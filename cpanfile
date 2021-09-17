@@ -1,0 +1,11 @@
+requires 'Modern::Perl';
+requires 'Data::Dumper';
+requires 'Getopt::Long::Descriptive';
+requires 'HTTP::Request::Common';
+requires 'JSON::XS';
+requires 'LWP::UserAgent';
+requires 'Parallel::ForkManager';
+requires 'Try::Tiny';
+requires 'WWW::Mechanize::Timed';
+requires 'List::Util';
+requires 'Text::ASCIITable';
