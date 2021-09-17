@@ -76,7 +76,7 @@ my ( $opt, $usage ) = describe_options(
     ],
     [],
     [ 'verbose|v', "print extra stuff" ],
-    [ 'help', "print usage message and exit", { shortcircuit => 1 } ],
+    [ 'help|h',    "print usage message and exit", { shortcircuit => 1 } ],
 );
 
 print( $usage->text ), exit if $opt->help;
@@ -329,46 +329,54 @@ foreach my $r (@responses) {
         my $pages = $r->{pages};
 
         foreach my $p (@$pages) {
-            push( @{ $results->{opac_search_results_client_total_times} },
-                  $p->{client_total_time} )
-              if $p->{type} eq 'search_results';
-            push( @{ $results->{opac_search_results_client_elapsed_times} },
-                  $p->{client_elapsed_time} )
-              if $p->{type} eq 'search_results';
-            push( @{ $results->{opac_search_details_client_total_times} },
-                  $p->{client_total_time} )
-              if $p->{type} eq 'result_details';
-            push( @{ $results->{opac_search_details_client_elapsed_times} },
-                  $p->{client_elapsed_time} )
-              if $p->{type} eq 'result_details';
+            push(
+                @{ $results->{opac_search_results_client_total_times} },
+                $p->{client_total_time}
+            ) if $p->{type} eq 'search_results';
+            push(
+                @{ $results->{opac_search_results_client_elapsed_times} },
+                $p->{client_elapsed_time}
+            ) if $p->{type} eq 'search_results';
+            push(
+                @{ $results->{opac_search_details_client_total_times} },
+                $p->{client_total_time}
+            ) if $p->{type} eq 'result_details';
+            push(
+                @{ $results->{opac_search_details_client_elapsed_times} },
+                $p->{client_elapsed_time}
+            ) if $p->{type} eq 'result_details';
         }
     }
     elsif ( $r->{type} eq 'circulation' ) {
         my $pages = $r->{pages};
 
         foreach my $p (@$pages) {
-            push( @{ $results->{checkin_client_total_times} },
-                  $p->{client_total_time} )
-              if $p->{type} eq 'checkin';
-            push( @{ $results->{checkin_client_elapsed_times} },
-                  $p->{client_elapsed_time} )
-              if $p->{type} eq 'checkin';
-            push( @{ $results->{checkout_client_total_times} },
-                  $p->{client_total_time} )
-              if $p->{type} eq 'checkout';
-            push( @{ $results->{checkout_client_elapsed_times} },
-                  $p->{client_elapsed_time} )
-              if $p->{type} eq 'checkout';
+            push(
+                @{ $results->{checkin_client_total_times} },
+                $p->{client_total_time}
+            ) if $p->{type} eq 'checkin';
+            push(
+                @{ $results->{checkin_client_elapsed_times} },
+                $p->{client_elapsed_time}
+            ) if $p->{type} eq 'checkin';
+            push(
+                @{ $results->{checkout_client_total_times} },
+                $p->{client_total_time}
+            ) if $p->{type} eq 'checkout';
+            push(
+                @{ $results->{checkout_client_elapsed_times} },
+                $p->{client_elapsed_time}
+            ) if $p->{type} eq 'checkout';
         }
 
     }
 }
 
-my $t = Text::ASCIITable->new({ headingText => 'Results' });
-$t->setCols('Type', 'Count', 'Average');
+my $t = Text::ASCIITable->new( { headingText => 'Results' } );
+$t->setCols( 'Type', 'Count', 'Average' );
 foreach my $key ( keys %$results ) {
     my $times = $results->{$key};
-    my $count   = scalar @$times;
+    my $count = scalar @$times;
     next unless $count;
     my $average = sum(@$times) / $count;
     $t->addRow( $key, $count, $average );
