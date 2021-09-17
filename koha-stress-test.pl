@@ -60,7 +60,7 @@ my ( $opt, $usage ) = describe_options(
     ],
     [
         'opac-searches-count|osc=i',
-        "Number of searches each virtual patrons will perform",
+        "Number of searches each virtual patron will perform",
         { default => $ENV{CHECKOUTS_COUNT} // 20 }
     ],
     [],
@@ -130,54 +130,56 @@ sub run_opac_searches {
 
         my @pages;
 
-        my $term = $search_keys[ rand @search_keys ];
-        say "SEARCHING FOR '$term' IN OPAC" if $opt->verbose;
+        foreach my $opac_search ( 1 .. $opt->opac_searches_count ) {
+            my $term = $search_keys[ rand @search_keys ];
+            say "STARTING SEARCH $opac_search FOR OPAC SEARCHER $opac_searches_counter USING SEARCH TERM '$term' IN OPAC" if $opt->verbose;
 
-        $agent->get( $opt->opac_url );
-        $agent->form_name('searchform');
-        $agent->field( 'q',   $term );
-        $agent->field( 'idx', '' );
-        $agent->click();
+            $agent->get( $opt->opac_url );
+            $agent->form_name('searchform');
+            $agent->field( 'q',   $term );
+            $agent->field( 'idx', '' );
+            $agent->click();
 
-        push(
-            @pages,
-            {
-                type                => 'search_results',
-                client_total_time   => $agent->client_total_time,
-                client_elapsed_time => $agent->client_elapsed_time
+            push(
+                @pages,
+                {
+                    type                => 'search_results',
+                    client_total_time   => $agent->client_total_time,
+                    client_elapsed_time => $agent->client_elapsed_time
+                }
+            );
+
+            sleep int( rand( $opt->max_delay ) ) + $opt->min_delay;
+
+            for my $i ( 1 .. 10 ) {
+                my $last = 0;
+
+                try {
+                    say "CHECKING SEARCH RESULT $i FOR '$term' IN OPAC"
+                      if $opt->verbose;
+
+                    $agent->follow_link( n => $i, class => 'title' );
+                    push(
+                        @pages,
+                        {
+                            type                => 'result_details',
+                            client_total_time   => $agent->client_total_time,
+                            client_elapsed_time => $agent->client_elapsed_time
+                        }
+                    );
+                    $agent->back;
+
+                    sleep int( rand( $opt->max_delay ) ) + $opt->min_delay
+                      if $opt->min_delay && $opt->max_delay;
+                }
+                catch {
+                    $last = 1;
+                };
+
+                last
+                  if $last
+                  ;    ## Supresses warning that shows if last is in catch block
             }
-        );
-
-        sleep int( rand( $opt->max_delay ) ) + $opt->min_delay;
-
-        for my $i ( 1 .. 10 ) {
-            my $last = 0;
-
-            try {
-                say "CHECKING SEARCH RESULT $i FOR '$term' IN OPAC"
-                  if $opt->verbose;
-
-                $agent->follow_link( n => $i, class => 'title' );
-                push(
-                    @pages,
-                    {
-                        type                => 'result_details',
-                        client_total_time   => $agent->client_total_time,
-                        client_elapsed_time => $agent->client_elapsed_time
-                    }
-                );
-                $agent->back;
-
-                sleep int( rand( $opt->max_delay ) ) + $opt->min_delay
-                  if $opt->min_delay && $opt->max_delay;
-            }
-            catch {
-                $last = 1;
-            };
-
-            last
-              if
-              $last;   ## Supresses warning that shows if last is in catch block
         }
 
         # send it back to the parent process
