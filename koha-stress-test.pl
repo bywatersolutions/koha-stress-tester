@@ -375,12 +375,12 @@ foreach my $r (@responses) {
 }
 
 my $t = Text::ASCIITable->new( { headingText => 'Results' } );
-$t->setCols( 'Type', 'Count', 'Average' );
-foreach my $key ( keys %$results ) {
+$t->setCols( 'Type', 'Page loads', 'Average load time' );
+foreach my $key ( sort keys %$results ) {
     my $times = $results->{$key};
     my $count = scalar @$times;
     next unless $count;
-    my $average = sum(@$times) / $count;
+    my $average = sprintf("%.3f", sum(@$times) / $count );
     $t->addRow( $key, $count, $average );
 }
 print $t;
