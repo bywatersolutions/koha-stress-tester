@@ -3,15 +3,17 @@
 use Modern::Perl;
 
 use Data::Dumper;
+use File::Basename;
 use Getopt::Long::Descriptive;
 use HTTP::Request::Common;
 use JSON::XS;
 use LWP::UserAgent;
+use List::Util qw(sum);
 use Parallel::ForkManager;
+use Text::ASCIITable;
+use Time::HiRes qw( gettimeofday );
 use Try::Tiny;
 use WWW::Mechanize::Timed;
-use List::Util qw(sum);
-use Text::ASCIITable;
 
 my ( $opt, $usage ) = describe_options(
     'koha-stress-test.pl %o ',
@@ -45,23 +47,23 @@ my ( $opt, $usage ) = describe_options(
     [
         'checkouts|c=i',
         "Simultaneous virtual librarians checking out and checking in",
-        { default => $ENV{CHECKOUTS} // 20 }
+        { default => $ENV{CHECKOUTS} // 0 }
     ],
     [
         'checkouts-count|cc=i',
         "Number of checkouts each virtual librarian will process",
-        { default => $ENV{CHECKOUTS_COUNT} // 20 }
+        { default => $ENV{CHECKOUTS_COUNT} // 0 }
     ],
     [],
     [
         'opac-searches|os=i',
         "Simultaneous public catalog searchs",
-        { default => $ENV{OPAC_SEARCHES} // 20 }
+        { default => $ENV{OPAC_SEARCHES} // 0 }
     ],
     [
         'opac-searches-count|osc=i',
         "Number of searches each virtual patron will perform",
-        { default => $ENV{CHECKOUTS_COUNT} // 20 }
+        { default => $ENV{CHECKOUTS_COUNT} // 0 }
     ],
     [],
     [
@@ -72,11 +74,27 @@ my ( $opt, $usage ) = describe_options(
     [
         'max-delay|max=i',
         "Maximum delay between actions",
-        { default => $ENV{MAX_DELAY} // 5 }
+        { default => $ENV{MAX_DELAY} // 3 }
     ],
     [],
-    [ 'verbose|v', "print extra stuff" ],
-    [ 'help|h',    "print usage message and exit", { shortcircuit => 1 } ],
+    [
+        "sip-checkouts|sc=s",
+        "Simultaneous virtual librarians checking in/out via SIP"
+    ],
+    [
+        "sip-checkouts-count|scc=s",
+        "Number of checkouts each virtual librarian will process via SIP"
+    ],
+    [ "sip-cli-emulator-path|scep=s", "path to sip_cli_emulator.pl" ],
+    [ "sip-host|sh=s",                "SIP host" ],
+    [ "sip-port|sp=s",                "SIP port" ],
+    [ "sip-user|sun=s",               "SIP username" ],
+    [ "sip-pass|spw=s",               "SIP passwrd" ],
+    [ "sip-loc|sl=s",                 "SIP location code" ],
+    [ "sip-term|st=s",                "SIP terminator" ],
+    [],
+    [ 'verbose|v+', "print extra stuff", { default => 0 } ],
+    [ 'help|h',     "print usage message and exit", { shortcircuit => 1 } ],
 );
 
 print( $usage->text ), exit if $opt->help;
@@ -108,11 +126,17 @@ $pm->run_on_finish(
     }
 );
 
-say "OPAC SEARCHES: " . $opt->opac_searches if $opt->verbose;
-run_opac_searches( $opt, $pm )              if $opt->opac_searches > 0;
+say "OPAC SEARCHES: " . $opt->opac_searches             if $opt->verbose;
+say "OPAC SEARCHES COUNT: " . $opt->opac_searches_count if $opt->verbose;
+run_opac_searches( $opt, $pm ) if $opt->opac_searches > 0;
 
-say "CHECKOUTS: " . $opt->checkouts if $opt->verbose;
-run_checkouts( $opt, $pm )          if $opt->checkouts > 0;
+say "CHECKOUTS: " . $opt->checkouts             if $opt->verbose;
+say "CHECKOUTS COUNT: " . $opt->checkouts_count if $opt->verbose;
+run_checkouts( $opt, $pm )                      if $opt->checkouts > 0;
+
+say "SIP CHECKOUTS: " . $opt->sip_checkouts             if $opt->verbose;
+say "SIP CHECKOUTS COUNT: " . $opt->sip_checkouts_count if $opt->verbose;
+run_sip_checkouts( $opt, $pm ) if $opt->sip_checkouts > 0;
 
 sub run_opac_searches {
     my ( $opt, $pm ) = @_;
@@ -132,7 +156,9 @@ sub run_opac_searches {
 
         foreach my $opac_search ( 1 .. $opt->opac_searches_count ) {
             my $term = $search_keys[ rand @search_keys ];
-            say "STARTING SEARCH $opac_search FOR OPAC SEARCHER $opac_searches_counter USING SEARCH TERM '$term' IN OPAC" if $opt->verbose;
+            say
+"STARTING SEARCH $opac_search FOR OPAC SEARCHER $opac_searches_counter USING SEARCH TERM '$term' IN OPAC"
+              if $opt->verbose;
 
             $agent->get( $opt->opac_url );
             $agent->form_name('searchform');
@@ -190,8 +216,6 @@ sub run_opac_searches {
 sub run_checkouts {
     my ( $opt, $pm ) = @_;
 
-    my @search_keys = "a" .. "z";    ## TODO Add dictionary file?
-
     my $ua = LWP::UserAgent->new();
 
     ## For now, each librarian will check out all items to one patron each
@@ -212,9 +236,9 @@ sub run_checkouts {
       while @$items_json;
 
     # run the parallel processes
-  OPAC_SEARCHES:
+  CHECKOUTS_LOOP:
     foreach my $checkouts_counter ( 1 .. $opt->checkouts ) {
-        $pm->start() and next OPAC_SEARCHES;
+        $pm->start() and next CHECKOUTS_LOOP;
         srand;
 
         my $patron       = $patrons->[ $checkouts_counter - 1 ];
@@ -313,6 +337,153 @@ sub run_checkouts {
     }
 }
 
+sub run_sip_checkouts {
+    my ( $opt, $pm ) = @_;
+
+    my $ua = LWP::UserAgent->new();
+
+    ## For now, each librarian will check out all items to one patron each
+    ## If we are doing regular checkouts to, let's use different patrons
+    say "FETCHING PATRONS" if $opt->verbose;
+    my $patrons_page  = $opt->checkouts ? $opt->checkouts + 1 : 1;
+    my $patrons_count = $opt->sip_checkouts;
+    my $request =
+      GET $opt->staff_url
+      . "/api/v1/patrons?_per_page=$patrons_count&_page=$patrons_page";
+    $request->authorization_basic( $opt->username, $opt->password );
+    my $response = $ua->request($request);
+    my $patrons  = decode_json( $response->decoded_content() );
+    say "RETRIEVED: " . @$patrons . " PATRONS" if $opt->verbose;
+
+# Note: this is not quite accurate, as we are specifying SIP checkouts number indepently from web based checkouts
+# But it should get us a set of items that are not shared by both processes
+# We should really get all the items ( and patrons ) using one API call then parcel them out to each subroutineu
+    say "FETCHING ITEMS" if $opt->verbose;
+    my $items_page = $opt->checkouts_count
+      && $opt->checkouts ? $opt->checkouts_checkouts * $opt->checkouts + 1 : 1;
+    my $items_count = $opt->sip_checkouts_count * $opt->sip_checkouts;
+    $request = GET $opt->staff_url
+      . "/api/v1/items?_per_page=$items_count&_page=$items_page";
+    $request->authorization_basic( $opt->username, $opt->password );
+    $response = $ua->request($request);
+    my $items_json = decode_json( $response->decoded_content() );
+    say "RETRIEVED: " . @$items_json . " ITEMS" if $opt->verbose;
+    my @items;
+    push( @items, [ splice @$items_json, 0, $opt->sip_checkouts_count ] )
+      while @$items_json;
+
+    # run the parallel processes
+  SIP_CHECKOUTS:
+    foreach my $checkouts_counter ( 1 .. $opt->sip_checkouts ) {
+        $pm->start() and next SIP_CHECKOUTS;
+        srand;
+
+        my $sip_cli_emulator_path = $opt->sip_cli_emulator_path;
+        my $sip_host              = $opt->sip_host;
+        my $sip_port              = $opt->sip_port;
+        my $sip_user              = $opt->sip_user;
+        my $sip_pass              = $opt->sip_pass;
+        my $sip_loc               = $opt->sip_loc;
+        my $sip_term              = $opt->sip_term;
+
+        my $patron       = $patrons->[ $checkouts_counter - 1 ];
+        my $items_to_use = $items[ $checkouts_counter - 1 ];
+
+        my $cardnumber = $patron->{cardnumber};
+
+        my $perl5lib = dirname($sip_cli_emulator_path) . '/..';
+        say "SIP CLI EMULATOR PATH: $sip_cli_emulator_path" if $opt->verbose >= 4;;
+        say "PERL5LIB: $perl5lib" if $opt->verbose >= 4;
+
+        my $base_cmd =
+qq{PERL5LIB=$perl5lib $sip_cli_emulator_path -a $sip_host -p $sip_port -su $sip_user -sp $sip_pass -l $sip_loc -t $sip_term --hold-mode +};
+        my $checkin_cmd = qq{$base_cmd -m checkin --item};
+        my $checkout_cmd =
+          qq{$base_cmd -m checkout --patron $cardnumber --item};
+
+        my $data = {};
+
+        my @pages;
+
+        # Checkin code duplicated below
+        foreach my $item (@$items_to_use) {
+            my $barcode = $item->{external_id};
+
+            say "CHECKING IN $barcode VIA SIP" if $opt->verbose;
+            say "$checkin_cmd $barcode"        if $opt->verbose >= 2;
+            my $start_time     = gettimeofday();
+            my $output         = `$checkin_cmd $barcode`;
+            say "NO RESPONSE" unless $output;
+            my $end_time       = gettimeofday();
+            my $execution_time = $end_time - $start_time;
+            say $output if $opt->verbose >= 1;
+
+            push(
+                @pages,
+                {
+                    type              => 'sip_checkin',
+                    client_total_time => $execution_time,
+                }
+            );
+
+            sleep int( rand( $opt->max_delay ) ) + $opt->min_delay
+              if $opt->min_delay && $opt->max_delay;
+        }
+
+        foreach my $item (@$items_to_use) {
+            my $barcode = $item->{external_id};
+
+            say "CHECKING OUT $barcode TO $cardnumber VIA SIP" if $opt->verbose;
+            say "$checkout_cmd $barcode" if $opt->verbose >= 2;
+            my $start_time     = gettimeofday();
+            my $output         = `$checkout_cmd $barcode`;
+            say "NO RESPONSE" unless $output;
+            my $end_time       = gettimeofday();
+            my $execution_time = $end_time - $start_time;
+            say $output if $opt->verbose >= 1;
+
+            push(
+                @pages,
+                {
+                    type              => 'sip_checkout',
+                    client_total_time => $execution_time,
+                }
+            );
+
+            sleep int( rand( $opt->max_delay ) ) + $opt->min_delay
+              if $opt->min_delay && $opt->max_delay;
+        }
+
+        # Checkin code duplicated above
+        foreach my $item (@$items_to_use) {
+            my $barcode = $item->{external_id};
+
+            say "CHECKING IN $barcode VIA SIP" if $opt->verbose;
+            say "$checkin_cmd $barcode"        if $opt->verbose >= 2;
+            my $start_time     = gettimeofday();
+            my $output         = `$checkin_cmd $barcode`;
+            say "NO RESPONSE" unless $output;
+            my $end_time       = gettimeofday();
+            my $execution_time = $end_time - $start_time;
+            say $output if $opt->verbose >= 1;
+
+            push(
+                @pages,
+                {
+                    type              => 'sip_checkin',
+                    client_total_time => $execution_time,
+                }
+            );
+
+            sleep int( rand( $opt->max_delay ) ) + $opt->min_delay
+              if $opt->min_delay && $opt->max_delay;
+        }
+
+        # send it back to the parent process
+        $pm->finish( 0, { type => 'sip_circulation', pages => \@pages } );
+    }
+}
+
 $pm->wait_all_children;
 
 my $results = {
@@ -324,6 +495,8 @@ my $results = {
     checkin_client_total_times               => [],
     checkout_client_elapsed_times            => [],
     checkout_client_total_times              => [],
+    sip_checkin_client_total_times           => [],
+    sip_checkout_client_total_times          => [],
 };
 
 foreach my $r (@responses) {
@@ -372,15 +545,30 @@ foreach my $r (@responses) {
         }
 
     }
+    elsif ( $r->{type} eq 'sip_circulation' ) {
+        my $pages = $r->{pages};
+
+        foreach my $p (@$pages) {
+            push(
+                @{ $results->{sip_checkin_client_total_times} },
+                $p->{client_total_time}
+            ) if $p->{type} eq 'sip_checkin';
+            push(
+                @{ $results->{sip_checkout_client_total_times} },
+                $p->{client_total_time}
+            ) if $p->{type} eq 'sip_checkout';
+        }
+
+    }
 }
 
 my $t = Text::ASCIITable->new( { headingText => 'Results' } );
-$t->setCols( 'Type', 'Page loads', 'Average load time' );
+$t->setCols( 'Type', 'Page loads', 'Average time (seconds)' );
 foreach my $key ( sort keys %$results ) {
     my $times = $results->{$key};
     my $count = scalar @$times;
     next unless $count;
-    my $average = sprintf("%.3f", sum(@$times) / $count );
+    my $average = sprintf( "%.3f", sum(@$times) / $count );
     $t->addRow( $key, $count, $average );
 }
 print $t;
