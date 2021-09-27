@@ -85,15 +85,19 @@ my ( $opt, $usage ) = describe_options(
         "sip-checkouts-count|scc=s",
         "Number of checkouts each virtual librarian will process via SIP"
     ],
-    [ "sip-cli-emulator-path|scep=s", "path to sip_cli_emulator.pl" ],
-    [ "sip-host|sh=s",                "SIP host" ],
-    [ "sip-port|sp=s",                "SIP port" ],
-    [ "sip-user|sun=s",               "SIP username" ],
-    [ "sip-pass|spw=s",               "SIP passwrd" ],
-    [ "sip-loc|sl=s",                 "SIP location code" ],
-    [ "sip-term|st=s",                "SIP terminator" ],
+    [
+        "sip-cli-emulator-path|scep=s",
+        "path to sip_cli_emulator.pl",
+        { default => $ENV{SIP_CLI_EMULATOR_PATH} }
+    ],
+    [ "sip-host|sh=s",  "SIP host" ],
+    [ "sip-port|sp=s",  "SIP port" ],
+    [ "sip-user|sun=s", "SIP username" ],
+    [ "sip-pass|spw=s", "SIP passwrd" ],
+    [ "sip-loc|sl=s",   "SIP location code" ],
+    [ "sip-term|st=s",  "SIP terminator" ],
     [],
-    [ 'verbose|v+', "print extra stuff", { default => 0 } ],
+    [ 'verbose|v+', "print extra stuff",            { default      => 0 } ],
     [ 'help|h',     "print usage message and exit", { shortcircuit => 1 } ],
 );
 
@@ -392,7 +396,8 @@ sub run_sip_checkouts {
         my $cardnumber = $patron->{cardnumber};
 
         my $perl5lib = dirname($sip_cli_emulator_path) . '/..';
-        say "SIP CLI EMULATOR PATH: $sip_cli_emulator_path" if $opt->verbose >= 4;;
+        say "SIP CLI EMULATOR PATH: $sip_cli_emulator_path"
+          if $opt->verbose >= 4;
         say "PERL5LIB: $perl5lib" if $opt->verbose >= 4;
 
         my $base_cmd =
@@ -411,8 +416,8 @@ qq{PERL5LIB=$perl5lib $sip_cli_emulator_path -a $sip_host -p $sip_port -su $sip_
 
             say "CHECKING IN $barcode VIA SIP" if $opt->verbose;
             say "$checkin_cmd $barcode"        if $opt->verbose >= 2;
-            my $start_time     = gettimeofday();
-            my $output         = `$checkin_cmd $barcode`;
+            my $start_time = gettimeofday();
+            my $output     = `$checkin_cmd $barcode`;
             say "NO RESPONSE" unless $output;
             my $end_time       = gettimeofday();
             my $execution_time = $end_time - $start_time;
@@ -435,8 +440,8 @@ qq{PERL5LIB=$perl5lib $sip_cli_emulator_path -a $sip_host -p $sip_port -su $sip_
 
             say "CHECKING OUT $barcode TO $cardnumber VIA SIP" if $opt->verbose;
             say "$checkout_cmd $barcode" if $opt->verbose >= 2;
-            my $start_time     = gettimeofday();
-            my $output         = `$checkout_cmd $barcode`;
+            my $start_time = gettimeofday();
+            my $output     = `$checkout_cmd $barcode`;
             say "NO RESPONSE" unless $output;
             my $end_time       = gettimeofday();
             my $execution_time = $end_time - $start_time;
@@ -460,8 +465,8 @@ qq{PERL5LIB=$perl5lib $sip_cli_emulator_path -a $sip_host -p $sip_port -su $sip_
 
             say "CHECKING IN $barcode VIA SIP" if $opt->verbose;
             say "$checkin_cmd $barcode"        if $opt->verbose >= 2;
-            my $start_time     = gettimeofday();
-            my $output         = `$checkin_cmd $barcode`;
+            my $start_time = gettimeofday();
+            my $output     = `$checkin_cmd $barcode`;
             say "NO RESPONSE" unless $output;
             my $end_time       = gettimeofday();
             my $execution_time = $end_time - $start_time;
