@@ -7,6 +7,7 @@ import http from 'k6/http';
 // ------------------------------------------------------------
 // Split the BASE URL into protocol and host parts
 const STAFF_URL = __ENV.STAFF_URL || 'http://kohadev-intra.localhost';
+const OPAC_URL = __ENV.OPAC_URL || 'http://kohadev.localhost';
 const [STAFF_PROTOCOL, STAFF_HOST] = STAFF_URL.split('://');
 const STAFF_BASE_URL = `${STAFF_PROTOCOL}://${STAFF_HOST}`; // Reconstruct to ensure proper format
 
@@ -165,6 +166,28 @@ async function checkin(page, item) {
     });
 }
 
+async function search_opac(term, page) {
+    console.log(`Searching OPAC for ${term}`);
+    page = page || await browser.newPage();
+
+    console.log(`Go to ${OPAC_URL}`);
+    await page.goto(OPAC_URL);
+
+    console.log("Type barcode");
+    await page.locator('input[name="q"]').type(term);
+
+    console.log("Click submit");
+    const submitButton = page.locator('#searchsubmit');
+    await Promise.all([submitButton.click(), page.waitForNavigation()]); 
+
+    await page.waitForSelector("body");
+    const results = await page.locator("#numresults").textContent();
+    console.log("Results: ", results);
+    check(results, {
+        'results are not empty': (results) => results !== ""
+    });
+}
+
 export default async function (data) {
 
     const borrowers = data.borrowers;
@@ -185,9 +208,10 @@ export default async function (data) {
     }
     console.log("ITEM EXTERNAL ID: ", item.external_id);
 
-    await checkin(page, item);
-    await checkout(page, borrower, item);
-    await checkin(page, item);
+    //await checkin(page, item);
+    //await checkout(page, borrower, item);
+    //await checkin(page, item);
+    await search_opac("cat");
 
     // -----------------------------
     // MAIN STAFF WORKFLOW LOOP
