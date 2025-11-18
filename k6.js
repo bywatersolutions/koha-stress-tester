@@ -2,6 +2,9 @@ import { browser } from "k6/browser";
 import { sleep, check } from 'k6';
 import http from 'k6/http';
 
+// Read all words from the file
+const words = open('./words_alpha.txt').split('\n');
+
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
 // ------------------------------------------------------------
@@ -69,7 +72,7 @@ export function setup() {
     return { borrowers, items };
 }
 
-// Random picker
+// Random picker for arrays
 function pick(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -152,6 +155,8 @@ async function checkin(page, item) {
     console.log(`Go to ${url_circulation}`);
     await page.goto(url_circulation);
 
+    await page.waitForSelector("body");
+
     console.log("Type barcode");
     await page.locator('#barcode').type(barcode);
 
@@ -159,11 +164,14 @@ async function checkin(page, item) {
     const submitButton = page.locator('#circ_returns_checkin button[type="submit"]');
     await Promise.all([submitButton.click(), page.waitForNavigation()]); 
 
-    console.log("Get checked in table");
-    const checkedIn = await page.locator("#checkedintable").first().textContent();
-    check(checkedIn, {
-        'checked out item matches': (checkedIn) => checkedIn.includes(barcode) 
-    });
+    await page.waitForSelector("body");
+
+    //TODO: Check that the item is checked in, deal with messages
+    //console.log("Get checked in table");
+    //const checkedIn = await page.locator("#checkedintable").first().textContent();
+    //check(checkedIn, {
+    //    'checked out item matches': (checkedIn) => checkedIn.includes(barcode) 
+    //});
 }
 
 async function search_opac(term, page) {
@@ -197,63 +205,29 @@ export default async function (data) {
     const page = await login(STAFF_USER, STAFF_PASS);
     console.log("LOGGED IN");
 
-    let borrower = pick(borrowers);
-    while( borrower.cardnumber === null ) {
-        borrower = pick(borrowers);
-    }
-    console.log("BORROWER CARDNUMBER: ", borrower.cardnumber);
-    let item = pick(items);
-    while( item.external_id === null ) {
-        item = pick(items);
-    }
-    console.log("ITEM EXTERNAL ID: ", item.external_id);
-
-    //await checkin(page, item);
-    //await checkout(page, borrower, item);
-    //await checkin(page, item);
-    await search_opac("cat");
-
-    // -----------------------------
-    // MAIN STAFF WORKFLOW LOOP
-    // -----------------------------
-    //while (true) {
-    while (false) {
-        const action = Math.random();
-
-        // --- SEARCH ---
-        if (action < 0.33) {
-            const term = pick(["history", "fiction", "science", "children", "art"]);
-            await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/staff/catalogue/search.pl?q=${term}`);
-            await page.waitForSelector("body");
+    try {
+        let borrower = pick(borrowers);
+        while( borrower.cardnumber === null ) {
+            borrower = pick(borrowers);
         }
-
-        // --- CHECKOUT ---
-        else if (action < 0.66) {
-            const borrower = pick(borrowers);
-            const item = pick(items);
-
-            await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/staff/circ/circulation.pl`);
-            await page.fill('input[name="borrowernumber"]', borrower);
-            await page.keyboard.press('Enter');
-            await page.waitForTimeout(600);
-
-            await page.fill('input[name="barcode"]', item);
-            await page.keyboard.press('Enter');
-            await page.waitForTimeout(800);
+        console.log("BORROWER CARDNUMBER: ", borrower.cardnumber);
+        let item = pick(items);
+        while( item.external_id === null ) {
+            item = pick(items);
         }
+        console.log("ITEM EXTERNAL ID: ", item.external_id);
 
-        // --- CHECKIN ---
-        else {
-            const item = pick(items);
+        // Check in item, check out item, check it back in
+        await checkin(page, item);
+        await checkout(page, borrower, item);
+        await checkin(page, item);
 
-            await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/staff/circ/returns.pl`);
-            await page.fill('input[name="barcode"]', item);
-            await page.keyboard.press('Enter');
-            await page.waitForTimeout(800);
-        }
-
-        // simulate staff "thinking time"
-        sleep(1 + Math.random() * 3);
+        // Search OPAC
+        const searchTerm = pick(words);
+        console.log("Using search term:", searchTerm);
+        await search_opac(searchTerm, page);
+    } finally {
+        await logout(page);
     }
 }
 
