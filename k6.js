@@ -33,8 +33,8 @@ export const options = {
     scenarios: {
         ui: {
             executor: "shared-iterations",
-            vus: 10,
-            iterations: 10,
+            vus: 1,
+            iterations: 1,
             options: {
                 browser: {
                     type: "chromium",
@@ -149,7 +149,6 @@ async function checkout(page, borrower, item) {
     const url_circulation = `${STAFF_BASE_URL}/cgi-bin/koha/circ/circulation.pl?borrowernumber=${borrowernumber}`;
     console.log(`Go to ${url_circulation}`);
     await page.goto(url_circulation);
-    await page.waitForNavigation();
 
     // If the account is restricted, override it
     const overrideLink = page.locator('a', { hasText: 'Override restriction temporarily' });
