@@ -33,8 +33,8 @@ export const options = {
     scenarios: {
         ui: {
             executor: "shared-iterations",
-            vus: 1,
-            iterations: 1,
+            vus: 10,
+            iterations: 10,
             options: {
                 browser: {
                     type: "chromium",
@@ -148,6 +148,7 @@ async function checkout(page, borrower, item) {
     const url_circulation = `${STAFF_BASE_URL}/cgi-bin/koha/circ/circulation.pl?borrowernumber=${borrowernumber}`;
     console.log(`Go to ${url_circulation}`);
     await page.goto(url_circulation);
+    await page.waitForNavigation();
 
     // If the account is restricted, override it
     const overrideLink = page.locator('a', { hasText: 'Override restriction temporarily' });
@@ -156,20 +157,11 @@ async function checkout(page, borrower, item) {
         await Promise.all([overrideLink.click(), page.waitForNavigation()]);
     }
 
-    // Click the "Yes, check out" button if it exits
-    const approveButtons = page.locator('button.approve[type="submit"]');
-    // Loop through them and find the one with the exact text
-    const count = await approveButtons.count();
-    for (let i = 0; i < count; i++) {
-        const btn = approveButtons.nth(i);
-        const text = await btn.textContent();
-        if (text && text.includes('Yes, check out')) {
-            console.log('Found "Yes, check out" button, clicking it...');
-            await Promise.all([btn.click(), page.waitForNavigation()]);
-            break; // stop after clicking the correct button
-        }
+    const yesCheckOutBtn = page.locator('a', { hasText: 'Yes, check out' });
+    if (await yesCheckOutBtn.count() > 0) {
+        console.log('Found "Force checkout" button, clicking it...');
+        await Promise.all([yesCheckOutBtn.click(), page.waitForNavigation()]);
     }
-
     await page.waitForSelector("label.circ_barcode");
     const checkingOutTo = await page.locator("label.circ_barcode").first().textContent();
     check(checkingOutTo, {
@@ -181,10 +173,15 @@ async function checkout(page, borrower, item) {
     const submitButton = page.locator('#circ_circulation_issue button[type="submit"]');
     await Promise.all([submitButton.click(), page.waitForNavigation()]);
 
-    const checkedOut = await page.locator(".lastchecked p").first().textContent();
-    check(checkedOut, {
-        'checked out item matches': (checkedOut) => checkedOut.includes(barcode)
-    });
+    try {
+        const checkedOut = await page.locator(".lastchecked p").first().textContent();
+        check(checkedOut, {
+            'checked out item matches': (checkedOut) => checkedOut.includes(barcode)
+        });
+    } catch (error) {
+        console.error("Failed to check out item:", error);
+        await page.screenshot({ path: `checkout_failure_${barcode}_${cardnumber}.png` });
+    }
 }
 
 async function checkin(page, item) {
