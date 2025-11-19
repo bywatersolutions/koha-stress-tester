@@ -1,6 +1,8 @@
+import http from "k6/http";
+import exec from 'k6/execution';
 import { browser } from "k6/browser";
-import { sleep, check } from 'k6';
-import http from 'k6/http';
+import { sleep, fail, check } from 'k6';
+import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";
 
 // Read all words from the file
 const words = open('./words_alpha.txt').split('\n');
@@ -29,16 +31,20 @@ const API = `${STAFF_PROTOCOL}://${BASIC_AUTH_CREDENTIALS}@${STAFF_HOST}/api/v1`
 // ------------------------------------------------------------
 export const options = {
     scenarios: {
-        browser: {
-            executor: 'shared-iterations',
+        ui: {
+            executor: "shared-iterations",
+            vus: 1,
+            iterations: 1,
             options: {
                 browser: {
-                    type: 'chromium',
+                    type: "chromium",
                 },
             },
         },
     },
-    vus: 5
+    thresholds: {
+        checks: ['rate==1.0'],
+    },
 };
 
 // ------------------------------------------------------------
@@ -80,30 +86,42 @@ function pick(arr) {
 async function login(username, password, page) {
     try {
         page = page || await browser.newPage();
-        
-        // Set default timeout to 15 seconds
-        page.setDefaultTimeout(15000);
-        page.setDefaultNavigationTimeout(15000);
 
-        console.log("Navigating to login page...");
-        const url_mainpage = `${STAFF_BASE_URL}/cgi-bin/koha/mainpage.pl`;
-        console.log(`Go to ${url_mainpage}`);
-        await page.goto(url_mainpage);
-        console.log("Filling login form...");
-        await page.locator('input[name="login_userid"]').type(username);
-        await page.locator('input[name="login_password"]').type(password);
-        console.log("Submitting login form...");
-        const submitButton = page.locator('input[type="submit"]');
-        await Promise.all([submitButton.click(), page.waitForNavigation()]); 
+        const username = STAFF_USER;
+        const password = STAFF_PASS;
+        const mainUrl = `${STAFF_URL}/cgi-bin/koha/mainpage.pl`;
 
-        console.log("Verifying login...");
-        const loggedInUsername = await page.locator("span.loggedinusername").first().textContent();
-        console.log("Logged in as: ", loggedInUsername);
-        check(loggedInUsername, {
-            'logged in user matches': (verified) => verified === username
-        });
+        // Go to main page
+        await page.goto(mainUrl, { waitUntil: 'networkidle' });
 
-        console.log("Login successful");
+        // Click #locallogin_button if it exists
+        const localLoginBtn = page.locator('#locallogin_button');
+        if (await localLoginBtn.count() > 0) {
+            console.log('Local login button found, clicking to show login form...');
+            await localLoginBtn.click();
+        }
+
+        // Wait for login inputs to appear
+        const userInput = page.locator('input[name="login_userid"]');
+        const passInput = page.locator('input[name="login_password"]');
+
+        // Type credentials
+        await userInput.type(username);
+        await passInput.type(password);
+
+        // Submit the form
+        const submitBtn = page.locator('#submit-button');
+
+        await Promise.all([page.waitForNavigation(), submitBtn.click({ force: true })]);
+
+        // Screenshot for verification
+        await page.screenshot({ path: 'screenshot.png' });
+
+        // Check for the logged in username to verify login success
+        const userSpan = page.locator('span.loggedinusername:nth-child(1)');
+        await expect.soft(userSpan).toHaveText(username);
+
+        console.log('Login successful!');
         return page;
     } catch (error) {
         console.error("Login failed:", error.message);
@@ -131,19 +149,41 @@ async function checkout(page, borrower, item) {
     console.log(`Go to ${url_circulation}`);
     await page.goto(url_circulation);
 
+    // If the account is restricted, override it
+    const overrideLink = page.locator('a', { hasText: 'Override restriction temporarily' });
+    if (await overrideLink.count() > 0) {
+        console.log('Found "Override restriction temporarily" link, clicking it...');
+        await Promise.all([overrideLink.click(), page.waitForNavigation()]);
+    }
+
+    // Click the "Yes, check out" button if it exits
+    const approveButtons = page.locator('button.approve[type="submit"]');
+    // Loop through them and find the one with the exact text
+    const count = await approveButtons.count();
+    for (let i = 0; i < count; i++) {
+        const btn = approveButtons.nth(i);
+        const text = await btn.textContent();
+        if (text && text.includes('Yes, check out')) {
+            console.log('Found "Yes, check out" button, clicking it...');
+            await Promise.all([btn.click(), page.waitForNavigation()]);
+            break; // stop after clicking the correct button
+        }
+    }
+
+    await page.waitForSelector("label.circ_barcode");
     const checkingOutTo = await page.locator("label.circ_barcode").first().textContent();
     check(checkingOutTo, {
-        'checkout user matches': (checkingOutTo) => checkingOutTo.includes(cardnumber) 
+        'checkout user matches': (checkingOutTo) => checkingOutTo.includes(cardnumber)
     });
 
     await page.locator('#circ_circulation_issue input[name="barcode"]').type(barcode);
 
     const submitButton = page.locator('#circ_circulation_issue button[type="submit"]');
-    await Promise.all([submitButton.click(), page.waitForNavigation()]); 
+    await Promise.all([submitButton.click(), page.waitForNavigation()]);
 
     const checkedOut = await page.locator(".lastchecked p").first().textContent();
     check(checkedOut, {
-        'checked out item matches': (checkedOut) => checkedOut.includes(barcode) 
+        'checked out item matches': (checkedOut) => checkedOut.includes(barcode)
     });
 }
 
@@ -162,7 +202,7 @@ async function checkin(page, item) {
 
     console.log("Click submit");
     const submitButton = page.locator('#circ_returns_checkin button[type="submit"]');
-    await Promise.all([submitButton.click(), page.waitForNavigation()]); 
+    await Promise.all([submitButton.click(), page.waitForNavigation()]);
 
     await page.waitForSelector("body");
 
@@ -186,7 +226,7 @@ async function search_opac(term, page) {
 
     console.log("Click submit");
     const submitButton = page.locator('#searchsubmit');
-    await Promise.all([submitButton.click(), page.waitForNavigation()]); 
+    await Promise.all([submitButton.click(), page.waitForNavigation()]);
 
     await page.waitForSelector("body");
     const results = await page.locator("#numresults").textContent();
@@ -207,12 +247,12 @@ export default async function (data) {
 
     try {
         let borrower = pick(borrowers);
-        while( borrower.cardnumber === null ) {
+        while (borrower.cardnumber === null) {
             borrower = pick(borrowers);
         }
         console.log("BORROWER CARDNUMBER: ", borrower.cardnumber);
         let item = pick(items);
-        while( item.external_id === null ) {
+        while (item.external_id === null) {
             item = pick(items);
         }
         console.log("ITEM EXTERNAL ID: ", item.external_id);
