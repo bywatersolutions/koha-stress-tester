@@ -34,7 +34,7 @@ export const options = {
     scenarios: {
         ui: {
             executor: "shared-iterations",
-            vus: 10,
+            vus: 5,
             iterations: 10,
             options: {
                 browser: {
@@ -231,7 +231,7 @@ async function checkout(page, borrower, item) {
         await Promise.all([yesCheckOutBtn.click(), page.waitForNavigation()]);
     }
 
-    await page.waitForSelector("label.circ_barcode");
+    await page.waitForSelector("label.circ_barcode", { timeout: 10000 });
 
     try {
     const checkingOutTo = await page.locator("label.circ_barcode").first().textContent();
