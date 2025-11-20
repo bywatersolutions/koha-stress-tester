@@ -65,20 +65,6 @@ export function setup() {
         }
     };
 
-    const borrowersRes = http.get(`${API}/patrons?_per_page=500`, params);
-    check(borrowersRes, {
-        'status is 200': (r) => r.status === 200
-    });
-    const borrowers = borrowersRes.json();
-    console.log(`Loaded ${borrowers.length} borrowers`);
-
-    const itemsRes = http.get(`${API}/items?_per_page=500`, params);
-    check(itemsRes, {
-        'status is 200': (r) => r.status === 200
-    });
-    const items = itemsRes.json();
-    console.log(`Loaded ${items.length} items`);
-
     const patronCategoriesRes = http.get(`${API}/patron_categories?_per_page=500`, params);
     check(patronCategoriesRes, {
         'status is 200': (r) => r.status === 200
@@ -100,7 +86,7 @@ export function setup() {
     const itemTypes = itemTypesRes.json();
     console.log(`Loaded ${itemTypes.length} item_types`);
 
-    return { borrowers, items, patronCategories, libraries, itemTypes };
+    return { patronCategories, libraries, itemTypes };
 }
 
 /**
@@ -109,9 +95,6 @@ export function setup() {
  * @returns {Promise<void>}
  */
 export default async function (data) {
-
-    const borrowers = data.borrowers;
-    const items = data.items;
 
     console.log("Logging in to Koha");
     const page = await login(STAFF_USER, STAFF_PASS);
