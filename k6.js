@@ -119,12 +119,12 @@ export default async function (data) {
         deleteKohaBiblio(biblio.id);
         deleteKohaPatron(patron.patron_id);
 
-    } catch(error) {
+    } catch (error) {
         console.error("ERROR! ERROR! ERROR!", error.message);
         if (page) {
             await page.screenshot({ path: "test_error.png" });
             const html = await page.content();
-            console.error("Page content:", html.substring(0, 1000)); // Log first 1000 chars of HTML
+            console.error("Page content:", html);
         }
         throw error; // Re-throw to fail the test
     } finally {
@@ -242,10 +242,10 @@ async function checkout(page, borrower, item) {
     await page.waitForSelector("label.circ_barcode", { timeout: 10000 });
 
     try {
-    const checkingOutTo = await page.locator("label.circ_barcode").first().textContent();
-    check(checkingOutTo, {
-        'checkout user matches': (checkingOutTo) => checkingOutTo.includes(cardnumber)
-    });
+        const checkingOutTo = await page.locator("label.circ_barcode").first().textContent();
+        check(checkingOutTo, {
+            'checkout user matches': (checkingOutTo) => checkingOutTo.includes(cardnumber)
+        });
     } catch (error) {
         console.error("Failed to find checkout to patron:", error);
         await page.screenshot({ path: `checkout_failure_to_${barcode}_${cardnumber}.png` });
@@ -369,11 +369,15 @@ function createKohaItem(biblioId, itemData) {
         'Content-Type': 'application/json',
     };
     const res = http.post(url, payload, { headers: headers });
-    check(res, {
-        'Status is 201 Created': (r) => r.status === 201,
-        'Response body contains new item data': (r) => r.json('item_id') !== undefined,
-    });
-    return res.json();
+    const itemId = res.json();
+    console.log("STATUS: ", res.status);
+    if (!check(res, {
+        'Item created': (r) => r.status === 201,
+        'Response body contains new item data': (r) => itemId.item_id !== undefined,
+    })) {
+        console.error("ERROR: Failed to create item: ", res);
+    }
+    return itemId;
 }
 
 /**
@@ -481,11 +485,8 @@ function createKohaBiblio(record) {
  */
 function createStubKohaPatron(data) {
     const patron_category_id = data.patronCategories[0].patron_category_id;
-    console.log("PATRON CATEGORY: ", patron_category_id);
     const library_id = data.libraries[1].library_id;
-    console.log("LIBRARY: ", library_id);
 
-    const url = `${API}/patrons`;
     const payload = JSON.stringify({
         "firstname": "John",
         "surname": "Doe",
@@ -495,21 +496,7 @@ function createStubKohaPatron(data) {
         "date_of_birth": "1990-01-01",
     });
 
-    const headers = {
-        'Content-Type': 'application/json',
-    };
-
-    // Send the POST request
-    const res = http.post(url, payload, { headers: headers });
-
-    // Basic checks within the function (or leave them in the default function)
-    check(res, {
-        'Status is 201 Created': (r) => r.status === 201,
-        'Response body contains new patron data': (r) => r.json('patron_id') !== undefined,
-    });
-
-    const patron = res.json();
-    console.log("Created stub patron", patron.external_id);
+    const patron = createKohaPatron(payload);
     return patron;
 }
 
