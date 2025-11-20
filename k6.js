@@ -21,8 +21,9 @@ const STAFF_PASS = __ENV.STAFF_PASS || 'koha';
 
 const BASIC_AUTH_CREDENTIALS = `${STAFF_USER}:${STAFF_PASS}`;
 
-console.log("URL: ", STAFF_BASE_URL);
-console.log("User: ", STAFF_USER);
+console.log("Staff URL: ", STAFF_BASE_URL);
+console.log("Staff User: ", STAFF_USER);
+console.log("Opac URL: ", OPAC_URL);
 
 const API = `${STAFF_PROTOCOL}://${BASIC_AUTH_CREDENTIALS}@${STAFF_HOST}/api/v1`;
 
@@ -96,6 +97,53 @@ export function setup() {
 
     return { borrowers, items, patronCategories, libraries, itemTypes };
 }
+
+export default async function (data) {
+
+    const borrowers = data.borrowers;
+    const items = data.items;
+
+    console.log("Logging in to Koha");
+    const page = await login(STAFF_USER, STAFF_PASS);
+    console.log("Logged in to Koha");
+
+    //const patron = createStubKohaPatron(data);
+    //console.log("PATRON: ", patron.patron_id);
+    //deleteKohaPatron(patron.patron_id);
+
+    //const biblio = createStubKohaBiblio(data);
+    //console.log("BIBLIO: ", biblio);
+    //const item = createStubKohaItem(data, biblio.id);
+    //console.log("ITEM: ", item);
+    //deleteKohaItem(item.item_id);
+    deleteKohaBiblio(biblio.id);
+
+    try {
+        let borrower = pick(borrowers);
+        while (borrower.cardnumber === null) {
+            borrower = pick(borrowers);
+        }
+        console.log("BORROWER CARDNUMBER: ", borrower.cardnumber);
+        let item = pick(items);
+        while (item.external_id === null) {
+            item = pick(items);
+        }
+        console.log("ITEM EXTERNAL ID: ", item.external_id);
+
+        // Check in item, check out item, check it back in
+        await checkin(page, item);
+        await checkout(page, borrower, item);
+        await checkin(page, item);
+
+        // Search OPAC
+        const searchTerm = pick(words);
+        console.log("Using search term:", searchTerm);
+        await search_opac(searchTerm, page);
+    } finally {
+        await logout(page);
+    }
+}
+
 
 // Random picker for arrays
 function pick(arr) {
@@ -251,43 +299,110 @@ async function search_opac(term, page) {
     });
 }
 
-export default async function (data) {
+function createStubKohaItem(data, biblioId) {
+    const externalId = randomBarcode();
+    const itemTypeId = data.itemTypes[0].item_type_id;
+    const homeLibraryId = data.libraries[1].library_id;
+    const holdingLibraryId = data.libraries[1].library_id;
 
-    const borrowers = data.borrowers;
-    const items = data.items;
+    const item = {
+        external_id: externalId,
+        item_type_id: itemTypeId,
+        home_library_id: homeLibraryId,
+        holding_library_id: holdingLibraryId,
+    };
+    console.log("Creating item: ", item);
+    return createKohaItem(biblioId, item);
+}
 
-    console.log("LOGGING IN");
-    const page = await login(STAFF_USER, STAFF_PASS);
-    console.log("LOGGED IN");
+function createKohaItem(biblioId, itemData) {
+    const url = `${API}/biblios/${biblioId}/items`;
+    const payload = JSON.stringify(itemData);
+    const headers = {
+        'Content-Type': 'application/json',
+    };
+    const res = http.post(url, payload, { headers: headers });
+    check(res, {
+        'Status is 201 Created': (r) => r.status === 201,
+        'Response body contains new item data': (r) => r.json('item_id') !== undefined,
+    });
+    return res.json();
+}
 
-    //const patron = createStubKohaPatron(data);
-    //console.log("PATRON: ", patron.patron_id);
-    //deleteKohaPatron(patron.patron_id);
+function deleteKohaItem(itemId) {
+    const url = `${API}/items/${itemId}`;
+    const res = http.del(url);
+    check(res, {
+        'Status is 204 No Content': (r) => r.status === 204,
+    });
+    console.log("Deleted item: ", itemId);
+}
 
-    try {
-        let borrower = pick(borrowers);
-        while (borrower.cardnumber === null) {
-            borrower = pick(borrowers);
-        }
-        console.log("BORROWER CARDNUMBER: ", borrower.cardnumber);
-        let item = pick(items);
-        while (item.external_id === null) {
-            item = pick(items);
-        }
-        console.log("ITEM EXTERNAL ID: ", item.external_id);
+function deleteKohaBiblio(biblioId) {
+    const url = `${API}/biblios/${biblioId}`;
+    const res = http.del(url);
+    check(res, {
+        'Status is 204 No Content': (r) => r.status === 204,
+    });
+    console.log("Deleted biblio: ", biblioId);
+}
 
-        // Check in item, check out item, check it back in
-        await checkin(page, item);
-        await checkout(page, borrower, item);
-        await checkin(page, item);
 
-        // Search OPAC
-        const searchTerm = pick(words);
-        console.log("Using search term:", searchTerm);
-        await search_opac(searchTerm, page);
-    } finally {
-        await logout(page);
-    }
+function createStubKohaBiblio($data) {
+    const biblio = {
+        "leader": "00000nam a2200000 i 4500",
+        "fields": [
+            { "001": "123456" },
+            { "005": "20250101000000.0" },
+            { "008": "250120s2025    xx            000 0 eng d" },
+            {
+                "100": {
+                    "ind1": "1",
+                    "ind2": " ",
+                    "subfields": [
+                        { "a": "Hall, Kyle" }
+                    ]
+                }
+            },
+            {
+                "245": {
+                    "ind1": "1",
+                    "ind2": "0",
+                    "subfields": [
+                        { "a": `${pick(words)} ${pick(words)}` },
+                        { "b": "A Load Testing Example for Koha" }
+                    ]
+                }
+            },
+            {
+                "260": {
+                    "ind1": " ",
+                    "ind2": " ",
+                    "subfields": [
+                        { "a": "USA" },
+                        { "b": "Load Testing Press" },
+                        { "c": "2025" }
+                    ]
+                }
+            }
+        ]
+    };
+
+    return createKohaBiblio(biblio);
+}
+function createKohaBiblio($record) {
+    const url = `${API}/biblios`;
+    const payload = JSON.stringify($record);
+    const headers = {
+        'Content-Type': 'application/marc-in-json',
+    };
+    const res = http.post(url, payload, { headers: headers });
+    check(res, {
+        'Status is 200': (r) => r.status === 200,
+        'Response body contains new biblio data': (r) => r.json('id') !== undefined,
+    });
+    console.log("Created biblio: ", res.json());
+    return res.json();
 }
 
 function createStubKohaPatron(data) {
@@ -319,8 +434,9 @@ function createStubKohaPatron(data) {
         'Response body contains new patron data': (r) => r.json('patron_id') !== undefined,
     });
 
-    console.log("PATRON CREATED: ", res.json());
-    return res.json();
+    const patron = res.json();
+    console.log("Created stub patron", patron.external_id);
+    return patron;
 }
 
 function createKohaPatron(patronData) {
@@ -341,8 +457,9 @@ function createKohaPatron(patronData) {
         'Response body contains new patron data': (r) => r.json('patron_id') !== undefined,
     });
 
-    console.log("PATRON CREATED: ", res.json());
-    return res.json();
+    const patron = res.json();
+    console.log("Created patron:", patron.external_id);
+    return patron;
 }
 
 function deleteKohaPatron(patronId) {
@@ -354,6 +471,7 @@ function deleteKohaPatron(patronId) {
         'DELETE Status is 204 No Content': (r) => r.status === 204,
     });
 
+    console.log("Deleted patron:", patronId);
     return res.status === 204;
 }
 
@@ -379,6 +497,15 @@ export function uuidv7() {
         Math.floor(Math.random() * 0xfffffff).toString(16).padStart(7, '0');
 
     return uuid;
+}
+
+export function randomBarcode() {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let out = "";
+    for (let i = 0; i < 20; i++) {
+        out += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return out;
 }
 
 export function uuidv7_32() {
