@@ -146,8 +146,6 @@ async function login(username, password, page) {
     try {
         page = page || await browser.newPage();
 
-        const username = STAFF_USER;
-        const password = STAFF_PASS;
         const mainUrl = `${STAFF_URL}/cgi-bin/koha/mainpage.pl`;
 
         // Go to main page
