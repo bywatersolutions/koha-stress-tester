@@ -123,8 +123,8 @@ export default async function (data) {
         console.error("ERROR! ERROR! ERROR!", error.message);
         if (page) {
             await page.screenshot({ path: "test_error.png" });
-            const html = await page.content();
-            console.error("Page content:", html);
+            //const html = await page.content();
+            //console.error("Page content:", html);
         }
         throw error; // Re-throw to fail the test
     } finally {
@@ -189,8 +189,8 @@ async function login(username, password, page) {
         console.error("Login failed:", error.message);
         if (page) {
             await page.screenshot({ path: "login_error.png" });
-            const html = await page.content();
-            console.error("Page content:", html.substring(0, 1000)); // Log first 1000 chars of HTML
+            //const html = await page.content();
+            //console.error("Page content:", html.substring(0, 1000)); // Log first 1000 chars of HTML
         }
         throw error; // Re-throw to fail the test
     }
@@ -484,6 +484,7 @@ function createKohaBiblio(record) {
  * @returns {Object} The created patron data
  */
 function createStubKohaPatron(data) {
+    console.log("createStubKohaPatron");
     const patron_category_id = data.patronCategories[0].patron_category_id;
     const library_id = data.libraries[1].library_id;
 
@@ -512,7 +513,7 @@ function createStubKohaPatron(data) {
  * @returns {Object} The created patron data
  */
 function createKohaPatron(patronData) {
-    console.log(createKohaPatron, patronData);
+    console.log("createKohaPatron", patronData);
     const url = `${API}/patrons`;
     const payload = JSON.stringify(patronData);
 
@@ -525,9 +526,12 @@ function createKohaPatron(patronData) {
 
     // Basic checks within the function (or leave them in the default function)
     check(res, {
-        'Status is 201 Created': (r) => r.status === 201,
+        'Koha patron created': (r) => r.status === 200,
         'Response body contains new patron data': (r) => r.json('patron_id') !== undefined,
     });
+    if ( res.status !== 201 || res.json('patron_id') === undefined ) {
+        console.log("ERROR: Failed to create patron: ", res);
+    }
 
     const patron = res.json();
     console.log("Created patron:", patron.external_id);
