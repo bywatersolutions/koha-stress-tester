@@ -52,6 +52,11 @@ export const options = {
 // ------------------------------------------------------------
 // SETUP — LOAD REAL BORROWERS + ITEMS FROM KOHA REST API
 // ------------------------------------------------------------
+/**
+ * Setup function that runs once before the test execution
+ * Loads test data from the Koha REST API
+ * @returns {Object} Object containing test data (borrowers, items, etc.)
+ */
 export function setup() {
 
     const params = {
@@ -98,6 +103,11 @@ export function setup() {
     return { borrowers, items, patronCategories, libraries, itemTypes };
 }
 
+/**
+ * Main test function that runs for each VU (Virtual User)
+ * @param {Object} data - Test data loaded in the setup function
+ * @returns {Promise<void>}
+ */
 export default async function (data) {
 
     const borrowers = data.borrowers;
@@ -119,14 +129,14 @@ export default async function (data) {
     deleteKohaBiblio(biblio.id);
 
     try {
-        let borrower = pick(borrowers);
+        let borrower = rando(borrowers);
         while (borrower.cardnumber === null) {
-            borrower = pick(borrowers);
+            borrower = rando(borrowers);
         }
         console.log("BORROWER CARDNUMBER: ", borrower.cardnumber);
-        let item = pick(items);
+        let item = rando(items);
         while (item.external_id === null) {
-            item = pick(items);
+            item = rando(items);
         }
         console.log("ITEM EXTERNAL ID: ", item.external_id);
 
@@ -136,7 +146,7 @@ export default async function (data) {
         await checkin(page, item);
 
         // Search OPAC
-        const searchTerm = pick(words);
+        const searchTerm = rando(words);
         console.log("Using search term:", searchTerm);
         await search_opac(searchTerm, page);
     } finally {
@@ -145,11 +155,23 @@ export default async function (data) {
 }
 
 
-// Random picker for arrays
-function pick(arr) {
+/**
+ * Randomly selects an element from an array
+ * @param {Array} arr - The array to pick an element from
+ * @returns {*} A random element from the input array
+ */
+function rando(arr) {
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/**
+ * Logs into the Koha staff interface
+ * @param {string} username - The username for authentication
+ * @param {string} password - The password for authentication
+ * @param {Object} [page] - Optional existing page object to use
+ * @returns {Promise<Object>} The authenticated page object
+ * @throws {Error} If login fails
+ */
 async function login(username, password, page) {
     try {
         page = page || await browser.newPage();
@@ -201,11 +223,26 @@ async function login(username, password, page) {
     }
 }
 
+/**
+ * Logs out of the Koha staff interface
+ * @param {Object} page - The page object to log out from
+ * @returns {Promise<void>}
+ */
 async function logout(page) {
     await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/staff/logout.pl`);
     await page.waitForSelector("body");
 }
 
+/**
+ * Performs a checkout operation in Koha
+ * @param {Object} page - The page object to perform the checkout on
+ * @param {Object} borrower - The borrower object containing patron information
+ * @param {string} borrower.patron_id - The patron ID
+ * @param {string} borrower.cardnumber - The patron's card number
+ * @param {Object} item - The item to check out
+ * @param {string} item.external_id - The item's barcode
+ * @returns {Promise<void>}
+ */
 async function checkout(page, borrower, item) {
     const borrowernumber = borrower.patron_id;
     const cardnumber = borrower.cardnumber;
@@ -250,6 +287,13 @@ async function checkout(page, borrower, item) {
     }
 }
 
+/**
+ * Performs a checkin operation in Koha
+ * @param {Object} page - The page object to perform the checkin on
+ * @param {Object} item - The item to check in
+ * @param {string} item.external_id - The item's barcode
+ * @returns {Promise<void>}
+ */
 async function checkin(page, item) {
     const barcode = item.external_id;
     console.log(`Check in ${barcode}`)
@@ -277,6 +321,12 @@ async function checkin(page, item) {
     //});
 }
 
+/**
+ * Searches the OPAC for a given term
+ * @param {string} term - The search term to look up
+ * @param {Object} [page] - Optional existing page object to use
+ * @returns {Promise<void>}
+ */
 async function search_opac(term, page) {
     console.log(`Searching OPAC for ${term}`);
     page = page || await browser.newPage();
@@ -299,6 +349,12 @@ async function search_opac(term, page) {
     });
 }
 
+/**
+ * Creates a stub Koha item with random data
+ * @param {Object} data - Data object from setup
+ * @param {number} biblioId - The biblio ID to associate the item with
+ * @returns {Object} The created item data
+ */
 function createStubKohaItem(data, biblioId) {
     const externalId = randomBarcode();
     const itemTypeId = data.itemTypes[0].item_type_id;
@@ -315,6 +371,12 @@ function createStubKohaItem(data, biblioId) {
     return createKohaItem(biblioId, item);
 }
 
+/**
+ * Creates a new Koha item via the API
+ * @param {number} biblioId - The biblio ID to associate the item with
+ * @param {Object} itemData - The item data to create
+ * @returns {Object} The created item data
+ */
 function createKohaItem(biblioId, itemData) {
     const url = `${API}/biblios/${biblioId}/items`;
     const payload = JSON.stringify(itemData);
@@ -329,6 +391,11 @@ function createKohaItem(biblioId, itemData) {
     return res.json();
 }
 
+/**
+ * Deletes a Koha item via the API
+ * @param {number} itemId - The ID of the item to delete
+ * @returns {void}
+ */
 function deleteKohaItem(itemId) {
     const url = `${API}/items/${itemId}`;
     const res = http.del(url);
@@ -338,6 +405,11 @@ function deleteKohaItem(itemId) {
     console.log("Deleted item: ", itemId);
 }
 
+/**
+ * Deletes a Koha biblio record via the API
+ * @param {number} biblioId - The ID of the biblio record to delete
+ * @returns {void}
+ */
 function deleteKohaBiblio(biblioId) {
     const url = `${API}/biblios/${biblioId}`;
     const res = http.del(url);
@@ -348,7 +420,12 @@ function deleteKohaBiblio(biblioId) {
 }
 
 
-function createStubKohaBiblio($data) {
+/**
+ * Creates a stub Koha biblio record with random data
+ * @param {Object} data - Data object from setup
+ * @returns {Object} The created biblio record
+ */
+function createStubKohaBiblio(data) {
     const biblio = {
         "leader": "00000nam a2200000 i 4500",
         "fields": [
@@ -369,7 +446,7 @@ function createStubKohaBiblio($data) {
                     "ind1": "1",
                     "ind2": "0",
                     "subfields": [
-                        { "a": `${pick(words)} ${pick(words)}` },
+                        { "a": `${rando(words)} ${rando(words)}` },
                         { "b": "A Load Testing Example for Koha" }
                     ]
                 }
@@ -390,9 +467,14 @@ function createStubKohaBiblio($data) {
 
     return createKohaBiblio(biblio);
 }
-function createKohaBiblio($record) {
+/**
+ * Creates a new Koha biblio record via the API
+ * @param {Object} record - The MARC record data in MARC-in-JSON format
+ * @returns {Object} The created biblio record
+ */
+function createKohaBiblio(record) {
     const url = `${API}/biblios`;
-    const payload = JSON.stringify($record);
+    const payload = JSON.stringify(record);
     const headers = {
         'Content-Type': 'application/marc-in-json',
     };
@@ -405,6 +487,13 @@ function createKohaBiblio($record) {
     return res.json();
 }
 
+/**
+ * Creates a stub Koha patron with random data
+ * @param {Object} data - Data object containing patron categories and libraries
+ * @param {Array<Object>} data.patronCategories - List of patron categories
+ * @param {Array<Object>} data.libraries - List of libraries
+ * @returns {Object} The created patron data
+ */
 function createStubKohaPatron(data) {
     const patron_category_id = data.patronCategories[0].patron_category_id;
     console.log("PATRON CATEGORY: ", patron_category_id);
@@ -415,7 +504,7 @@ function createStubKohaPatron(data) {
     const payload = JSON.stringify({
         "firstname": "John",
         "surname": "Doe",
-        "cardnumber": uuidv7_32(),
+        "cardnumber": randomCardnumber(),
         "library_id": library_id,
         "category_id": patron_category_id,
         "date_of_birth": "1990-01-01",
@@ -439,6 +528,17 @@ function createStubKohaPatron(data) {
     return patron;
 }
 
+/**
+ * Creates a new Koha patron via the API
+ * @param {Object} patronData - The patron data to create
+ * @param {string} patronData.cardnumber - The patron's card number
+ * @param {number} patronData.category_id - The patron category ID
+ * @param {string} patronData.branchcode - The patron's home library code
+ * @param {string} patronData.surname - The patron's surname
+ * @param {string} patronData.firstname - The patron's first name
+ * @param {string} patronData.dateofbirth - The patron's date of birth (YYYY-MM-DD)
+ * @returns {Object} The created patron data
+ */
 function createKohaPatron(patronData) {
     console.log(createKohaPatron, patronData);
     const url = `${API}/patrons`;
@@ -462,6 +562,11 @@ function createKohaPatron(patronData) {
     return patron;
 }
 
+/**
+ * Deletes a Koha patron via the API
+ * @param {number} patronId - The ID of the patron to delete
+ * @returns {void}
+ */
 function deleteKohaPatron(patronId) {
     const url = `${API}/patrons/${patronId}`;
 
@@ -475,31 +580,11 @@ function deleteKohaPatron(patronId) {
     return res.status === 204;
 }
 
-// UUIDv7 generator
-export function uuidv7() {
-    const now = BigInt(Date.now()); // milliseconds since epoch
-    // Convert timestamp to hex, 12 chars (48 bits)
-    let tsHex = now.toString(16).padStart(12, '0');
-
-    // Generate 10 random hex chars (40 bits)
-    let rand = '';
-    for (let i = 0; i < 10; i++) {
-        rand += Math.floor(Math.random() * 16).toString(16);
-    }
-
-    // UUIDv7 format: tttttttttttt-vvvv-7xxx-xxxx-xxxxxxxxxxxx
-    // We'll do a simplified version: timestamp + version + random
-    const uuid =
-        tsHex + '-' +               // timestamp
-        rand.slice(0, 4) + '-7' +  // version 7
-        rand.slice(4, 7) + '-' +
-        rand.slice(7, 10) + '-' +
-        Math.floor(Math.random() * 0xfffffff).toString(16).padStart(7, '0');
-
-    return uuid;
-}
-
-export function randomBarcode() {
+/**
+ * Generates a random barcode
+ * @returns {string} A random barcode string
+ */
+function randomBarcode() {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     let out = "";
     for (let i = 0; i < 20; i++) {
@@ -508,7 +593,11 @@ export function randomBarcode() {
     return out;
 }
 
-export function uuidv7_32() {
+/**
+ * Generates a patron card number
+ * @returns {string} A random card number 
+ */
+function randomCardnumber() {
     // 48-bit timestamp (milliseconds since epoch)
     const timestamp = BigInt(Date.now());
     let ts = timestamp.toString(16).padStart(12, "0"); // 12 hex chars = 48 bits
