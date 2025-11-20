@@ -101,16 +101,19 @@ export default async function (data) {
     console.log("Logged in to Koha");
 
     try {
-        sleep(Math.random() * 5);
+        sleep(Math.random() * 10);
         const patron = createStubKohaPatron(data);
-        sleep(1);
+        sleep(Math.random() * 10);
         const biblio = createStubKohaBiblio(data);
-        sleep(1);
+        sleep(Math.random() * 10);
         const item = createStubKohaItem(data, biblio.id);
 
         // Check in item, check out item, check it back in
+        sleep(Math.random() * 3);
         await checkin(page, item);
+        sleep(Math.random() * 3);
         await checkout(page, patron, item);
+        sleep(Math.random() * 3);
         await checkin(page, item);
 
         // Search OPAC
@@ -486,21 +489,22 @@ function createKohaBiblio(record) {
  * @returns {Object} The created patron data
  */
 function createStubKohaPatron(data) {
-    console.log("createStubKohaPatron");
     const patron_category_id = data.patronCategories[0].patron_category_id;
+    console.log("PATRON CATEGORY: ", patron_category_id);
     const library_id = data.libraries[1].library_id;
+    console.log("LIBRARY: ", library_id);
 
-    const payload = JSON.stringify({
-        "firstname": "John",
-        "surname": "Doe",
+    const patron = {
+        "firstname": rando(words),
+        "surname": rando(words),
         "cardnumber": randomCardnumber(),
         "library_id": library_id,
         "category_id": patron_category_id,
         "date_of_birth": "1990-01-01",
-    });
+        "statistics_1": "Koha Stress Test",
+    };
 
-    const patron = createKohaPatron(payload);
-    return patron;
+    return createKohaPatron(patron);
 }
 
 /**
@@ -516,27 +520,29 @@ function createStubKohaPatron(data) {
  */
 function createKohaPatron(patronData) {
     console.log("createKohaPatron", patronData);
+
     const url = `${API}/patrons`;
-    const payload = JSON.stringify(patronData);
 
     const headers = {
         'Content-Type': 'application/json',
     };
+
+    const payload = JSON.stringify(patronData);
 
     // Send the POST request
     const res = http.post(url, payload, { headers: headers });
 
     // Basic checks within the function (or leave them in the default function)
     check(res, {
-        'Koha patron created': (r) => r.status === 200,
+        'Patron created': (r) => r.status === 201,
         'Response body contains new patron data': (r) => r.json('patron_id') !== undefined,
     });
     if (res.status !== 201 || res.json('patron_id') === undefined) {
-        console.log("ERROR: Failed to create patron: ", res);
+        console.error("ERROR: Failed to create patron: ", res.status, res.body, payload);
     }
 
     const patron = res.json();
-    console.log("Created patron:", patron.external_id);
+    console.log("Created stub patron", patron.external_id);
     return patron;
 }
 
