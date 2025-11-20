@@ -117,38 +117,25 @@ export default async function (data) {
     const page = await login(STAFF_USER, STAFF_PASS);
     console.log("Logged in to Koha");
 
-    //const patron = createStubKohaPatron(data);
-    //console.log("PATRON: ", patron.patron_id);
-    //deleteKohaPatron(patron.patron_id);
-
-    //const biblio = createStubKohaBiblio(data);
-    //console.log("BIBLIO: ", biblio);
-    //const item = createStubKohaItem(data, biblio.id);
-    //console.log("ITEM: ", item);
-    //deleteKohaItem(item.item_id);
-    deleteKohaBiblio(biblio.id);
-
     try {
-        let borrower = rando(borrowers);
-        while (borrower.cardnumber === null) {
-            borrower = rando(borrowers);
-        }
-        console.log("BORROWER CARDNUMBER: ", borrower.cardnumber);
-        let item = rando(items);
-        while (item.external_id === null) {
-            item = rando(items);
-        }
-        console.log("ITEM EXTERNAL ID: ", item.external_id);
+        const patron = createStubKohaPatron(data);
+        const biblio = createStubKohaBiblio(data);
+        const item = createStubKohaItem(data, biblio.id);
 
         // Check in item, check out item, check it back in
         await checkin(page, item);
-        await checkout(page, borrower, item);
+        await checkout(page, patron, item);
         await checkin(page, item);
 
         // Search OPAC
         const searchTerm = rando(words);
         console.log("Using search term:", searchTerm);
         await search_opac(searchTerm, page);
+
+        deleteKohaItem(item.item_id);
+        deleteKohaBiblio(biblio.id);
+        deleteKohaPatron(patron.patron_id);
+
     } finally {
         await logout(page);
     }
@@ -610,7 +597,7 @@ function randomCardnumber() {
 
     // Insert version 7 (replace high nibble of byte 7)
     const versionNibble = "7";
-    randomHex = 
+    randomHex =
         randomHex.substring(0, 12) +  // up to byte 6
         versionNibble +               // version 7 nibble
         randomHex.substring(13);      // rest
