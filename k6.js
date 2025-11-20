@@ -119,6 +119,14 @@ export default async function (data) {
         deleteKohaBiblio(biblio.id);
         deleteKohaPatron(patron.patron_id);
 
+    } catch(error) {
+        console.error("ERROR! ERROR! ERROR!", error.message);
+        if (page) {
+            await page.screenshot({ path: "test_error.png" });
+            const html = await page.content();
+            console.error("Page content:", html.substring(0, 1000)); // Log first 1000 chars of HTML
+        }
+        throw error; // Re-throw to fail the test
     } finally {
         await logout(page);
     }
