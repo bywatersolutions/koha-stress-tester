@@ -34,8 +34,8 @@ export const options = {
     scenarios: {
         ui: {
             executor: "shared-iterations",
-            vus: 1,
-            iterations: 1,
+            vus: 10,
+            iterations: 10,
             options: {
                 browser: {
                     type: "chromium",
@@ -171,9 +171,6 @@ async function login(username, password, page) {
 
         await Promise.all([page.waitForNavigation(), submitBtn.click({ force: true })]);
 
-        // Screenshot for verification
-        await page.screenshot({ path: 'screenshot.png' });
-
         // Check for the logged in username to verify login success
         const userSpan = page.locator('span.loggedinusername:nth-child(1)');
         await expect.soft(userSpan).toHaveText(username);
@@ -233,11 +230,18 @@ async function checkout(page, borrower, item) {
         console.log('Found "Force checkout" button, clicking it...');
         await Promise.all([yesCheckOutBtn.click(), page.waitForNavigation()]);
     }
+
     await page.waitForSelector("label.circ_barcode");
+
+    try {
     const checkingOutTo = await page.locator("label.circ_barcode").first().textContent();
     check(checkingOutTo, {
         'checkout user matches': (checkingOutTo) => checkingOutTo.includes(cardnumber)
     });
+    } catch (error) {
+        console.error("Failed to find checkout to patron:", error);
+        await page.screenshot({ path: `checkout_failure_to_${barcode}_${cardnumber}.png` });
+    }
 
     await page.locator('#circ_circulation_issue input[name="barcode"]').type(barcode);
 
@@ -302,7 +306,7 @@ async function search_opac(term, page) {
     console.log(`Go to ${OPAC_URL}`);
     await page.goto(OPAC_URL);
 
-    console.log("Type barcode");
+    console.log("Type search term");
     await page.locator('input[name="q"]').type(term);
 
     console.log("Click submit");
@@ -310,11 +314,16 @@ async function search_opac(term, page) {
     await Promise.all([submitButton.click(), page.waitForNavigation()]);
 
     await page.waitForSelector("body");
-    const results = await page.locator("#numresults").textContent();
-    console.log("Results: ", results);
-    check(results, {
-        'results are not empty': (results) => results !== ""
-    });
+    try {
+        const results = await page.locator("#numresults").textContent();
+        console.log("Results: ", results);
+        check(results, {
+            'results are not empty': (results) => results !== ""
+        });
+    } catch (error) {
+        console.error(`Failed to get results for search term ${term}:`, error);
+        await page.screenshot({ path: `failed_opac_search_${term}.png` });
+    }
 }
 
 /**
