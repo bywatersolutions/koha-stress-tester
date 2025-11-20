@@ -101,8 +101,11 @@ export default async function (data) {
     console.log("Logged in to Koha");
 
     try {
+        sleep(Math.random() * 5);
         const patron = createStubKohaPatron(data);
+        sleep(1);
         const biblio = createStubKohaBiblio(data);
+        sleep(1);
         const item = createStubKohaItem(data, biblio.id);
 
         // Check in item, check out item, check it back in
@@ -371,12 +374,11 @@ function createKohaItem(biblioId, itemData) {
     const res = http.post(url, payload, { headers: headers });
     const itemId = res.json();
     console.log("STATUS: ", res.status);
-    if (!check(res, {
+    check(res, {
         'Item created': (r) => r.status === 201,
         'Response body contains new item data': (r) => itemId.item_id !== undefined,
-    })) {
-        console.error("ERROR: Failed to create item: ", res);
-    }
+    });
+
     return itemId;
 }
 
@@ -529,7 +531,7 @@ function createKohaPatron(patronData) {
         'Koha patron created': (r) => r.status === 200,
         'Response body contains new patron data': (r) => r.json('patron_id') !== undefined,
     });
-    if ( res.status !== 201 || res.json('patron_id') === undefined ) {
+    if (res.status !== 201 || res.json('patron_id') === undefined) {
         console.log("ERROR: Failed to create patron: ", res);
     }
 
