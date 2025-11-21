@@ -11,8 +11,8 @@ export const options = {
     scenarios: {
         ui: {
             executor: "shared-iterations",
-            vus: 40,
-            iterations: 40,
+            vus: 10,
+            iterations: 10,
             options: {
                 browser: {
                     type: "chromium",
@@ -236,9 +236,9 @@ async function checkout(page, patron, item) {
     const url_circulation = `${STAFF_BASE_URL}/cgi-bin/koha/circ/circulation.pl?borrowernumber=${patron_id}`;
     console.log(`Go to ${url_circulation}`);
     try {
-        await page.goto(url_circulation);
+        await page.goto(url_circulation, { waitUntil: "domcontentloaded" });
     } catch (error) {
-        console.error(`Failed to go to ${url_circulation}:`, error, "PATRON: ", patron );
+        console.error(`Failed to go to ${url_circulation}:`, error, "PATRON: ", patron);
         await page.screenshot({ path: `failed_goto_circulation_${patron_id}.png` });
     }
 
@@ -295,7 +295,7 @@ async function checkin(page, item) {
     const url_circulation = `${STAFF_BASE_URL}/cgi-bin/koha/circ/returns.pl`;
     console.log(`Go to ${url_circulation}`);
     try {
-    await page.goto(url_circulation);
+        await page.goto(url_circulation, { waitUntil: "domcontentloaded" });
     } catch (error) {
         console.error(`Failed to go to ${url_circulation}:`, error);
         await page.screenshot({ path: `failed_goto_returns_${barcode}.png` });
@@ -303,7 +303,7 @@ async function checkin(page, item) {
 
     await page.waitForSelector("body");
 
-    console.log("Type barcode");
+    console.log("Type barcode ${barcode}");
     await page.locator('#barcode').type(barcode);
 
     console.log("Click submit");
@@ -377,7 +377,7 @@ function createStubKohaItem(data, biblioId) {
 
     let loops = 0;
     let itemId;
-    while ( !itemId ) {
+    while (!itemId) {
         itemId = createKohaItem(biblioId, item);
         sleep(loops);
         loops++;
@@ -488,7 +488,7 @@ function createStubKohaBiblio(data) {
 
     let biblio;
     let loops = 0;
-    while ( !biblio ) {
+    while (!biblio) {
         biblio = createKohaBiblio(biblioData);
         sleep(loops);
         loops++;
@@ -545,7 +545,7 @@ function createStubKohaPatron(data) {
 
     let patron;
     let loops = 0;
-    while ( !patron ) {
+    while (!patron) {
         patron = createKohaPatron(patronData);
         sleep(loops);
         loops++;
