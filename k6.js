@@ -11,8 +11,8 @@ export const options = {
     scenarios: {
         ui: {
             executor: "shared-iterations",
-            vus: 1,
-            iterations: 1,
+            vus: 10,
+            iterations: 10,
             options: {
                 browser: {
                     type: "chromium",
@@ -67,40 +67,29 @@ export function setup() {
 
     const patronCategoriesRes = http.get(`${API}/patron_categories?_per_page=500`, params);
     check(patronCategoriesRes, {
-        'status is 200': (r) => r.status === 200
+        'Loaded patron categories': (r) => r.status === 200
     });
     const patronCategories = patronCategoriesRes.json();
     console.log(`Loaded ${patronCategories.length} patron categories`);
 
     const librariesRes = http.get(`${API}/libraries?_per_page=500`, params);
     check(librariesRes, {
-        'status is 200': (r) => r.status === 200
+        'Loaded libraries': (r) => r.status === 200
     });
     const libraries = librariesRes.json();
     console.log(`Loaded ${libraries.length} libraries`);
 
     const itemTypesRes = http.get(`${API}/item_types?_per_page=500`, params);
     check(itemTypesRes, {
-        'status is 200': (r) => r.status === 200
+        'Loaded item types': (r) => r.status === 200
     });
     const itemTypes = itemTypesRes.json();
     console.log(`Loaded ${itemTypes.length} item_types`);
 
-    let created = {
-        patrons: [],
-        biblos: [],
-        items: [],
-    };
-
-    return { patronCategories, libraries, itemTypes, created };
+    return { patronCategories, libraries, itemTypes };
 }
 
 export function teardown(data) {
-  console.log("******************** TEARDOWN ********************")
-  console.log("Patrons created: ", data.created.patrons.length);
-  console.log(" Biblos created: ", data.created.biblos.length);
-  console.log("  Items created: ", data.created.items.length);
-  console.log("**************************************************")
 }
 
 /**
@@ -348,7 +337,7 @@ async function search_opac(term, page) {
         const results = await page.locator("#numresults").textContent();
         console.log("Results: ", results);
         check(results, {
-            'results are not empty': (results) => results !== ""
+            'Has search results': (results) => results !== ""
         });
     } catch (error) {
         console.error(`Failed to get results for search term ${term}:`, error);
@@ -379,7 +368,6 @@ function createStubKohaItem(data, biblioId) {
     console.log("Creating item: ", item);
 
     const itemId = createKohaItem(biblioId, item);
-    data.created.items.push(itemId);
 
     return itemId;
 }
@@ -398,7 +386,6 @@ function createKohaItem(biblioId, itemData) {
     };
     const res = http.post(url, payload, { headers: headers });
     const itemId = res.json();
-    console.log("STATUS: ", res.status);
     check(res, {
         'Item created': (r) => r.status === 201,
         'Response body contains new item data': (r) => itemId.item_id !== undefined,
@@ -481,8 +468,6 @@ function createStubKohaBiblio(data) {
         ]
     };
 
-    data.created.biblos.push(biblio.id);
-
     return createKohaBiblio(biblio);
 }
 /**
@@ -498,7 +483,7 @@ function createKohaBiblio(record) {
     };
     const res = http.post(url, payload, { headers: headers });
     check(res, {
-        'Status is 200': (r) => r.status === 200,
+        'Biblio created': (r) => r.status === 200,
         'Response body contains new biblio data': (r) => r.json('id') !== undefined,
     });
     console.log("Created biblio: ", res.json());
@@ -517,9 +502,7 @@ function createKohaBiblio(record) {
  */
 function createStubKohaPatron(data) {
     const patron_category_id = data.patronCategories[0].patron_category_id;
-    console.log("PATRON CATEGORY: ", patron_category_id);
     const library_id = data.libraries[1].library_id;
-    console.log("LIBRARY: ", library_id);
 
     const patronData = {
         "firstname": rando(words),
@@ -532,7 +515,6 @@ function createStubKohaPatron(data) {
     };
 
     const patron = createKohaPatron(patronData);
-    data.created.patrons.push(patron.patron_id);
     
     return patron;
 }
@@ -572,7 +554,6 @@ function createKohaPatron(patronData) {
     }
 
     const patron = res.json();
-    console.log("PATRON", patron);
     console.log("Created stub patron", patron.patron_id);
 
     return patron;
