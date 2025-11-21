@@ -34,8 +34,8 @@ export const options = {
     scenarios: {
         ui: {
             executor: "shared-iterations",
-            vus: 1,
-            iterations: 1,
+            vus: 5,
+            iterations: 10,
             options: {
                 browser: {
                     type: "chromium",
@@ -86,21 +86,7 @@ export function setup() {
     const itemTypes = itemTypesRes.json();
     console.log(`Loaded ${itemTypes.length} item_types`);
 
-    let created = {
-        patrons: [],
-        biblos: [],
-        items: [],
-    };
-
-    return { patronCategories, libraries, itemTypes, created };
-}
-
-export function teardown(data) {
-  console.log("******************** TEARDOWN ********************")
-  console.log("Patrons created: ", data.created.patrons.length);
-  console.log(" Biblos created: ", data.created.biblos.length);
-  console.log("  Items created: ", data.created.items.length);
-  console.log("**************************************************")
+    return { patronCategories, libraries, itemTypes };
 }
 
 /**
@@ -150,8 +136,6 @@ export default async function (data) {
     } finally {
         await logout(page);
     }
-
-    console.log("DONE");
 }
 
 
@@ -375,13 +359,8 @@ function createStubKohaItem(data, biblioId) {
         holding_library_id: holdingLibraryId,
         callnumber: 'KohaStressTest',
     };
-
     console.log("Creating item: ", item);
-
-    const itemId = createKohaItem(biblioId, item);
-    data.created.items.push(itemId);
-
-    return itemId;
+    return createKohaItem(biblioId, item);
 }
 
 /**
@@ -416,7 +395,7 @@ function deleteKohaItem(itemId) {
     const url = `${API}/items/${itemId}`;
     const res = http.del(url);
     check(res, {
-        'Item deleted': (r) => r.status === 204,
+        'Status is 204 No Content': (r) => r.status === 204,
     });
     console.log("Deleted item: ", itemId);
 }
@@ -430,7 +409,7 @@ function deleteKohaBiblio(biblioId) {
     const url = `${API}/biblios/${biblioId}`;
     const res = http.del(url);
     check(res, {
-        'Bilio deleted': (r) => r.status === 204,
+        'Status is 204 No Content': (r) => r.status === 204,
     });
     console.log("Deleted biblio: ", biblioId);
 }
@@ -481,8 +460,6 @@ function createStubKohaBiblio(data) {
         ]
     };
 
-    data.created.biblos.push(biblio.id);
-
     return createKohaBiblio(biblio);
 }
 /**
@@ -502,10 +479,7 @@ function createKohaBiblio(record) {
         'Response body contains new biblio data': (r) => r.json('id') !== undefined,
     });
     console.log("Created biblio: ", res.json());
-
-    let biblio = res.json();
-
-    return biblio;
+    return res.json();
 }
 
 /**
@@ -521,7 +495,7 @@ function createStubKohaPatron(data) {
     const library_id = data.libraries[1].library_id;
     console.log("LIBRARY: ", library_id);
 
-    const patronData = {
+    const patron = {
         "firstname": rando(words),
         "surname": rando(words),
         "cardnumber": randomCardnumber(),
@@ -531,10 +505,7 @@ function createStubKohaPatron(data) {
         "statistics_1": "KohaStressTest",
     };
 
-    const patron = createKohaPatron(patronData);
-    data.created.patrons.push(patron.patron_id);
-    
-    return patron;
+    return createKohaPatron(patron);
 }
 
 /**
@@ -572,9 +543,7 @@ function createKohaPatron(patronData) {
     }
 
     const patron = res.json();
-    console.log("PATRON", patron);
-    console.log("Created stub patron", patron.patron_id);
-
+    console.log("Created stub patron", patron.external_id);
     return patron;
 }
 
@@ -589,7 +558,7 @@ function deleteKohaPatron(patronId) {
     const res = http.del(url); // 'null' for the body as DELETE requests usually don't send one
 
     check(res, {
-        'Patron deleted': (r) => r.status === 204,
+        'DELETE Status is 204 No Content': (r) => r.status === 204,
     });
 
     console.log("Deleted patron:", patronId);
