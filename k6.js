@@ -11,8 +11,8 @@ export const options = {
     scenarios: {
         ui: {
             executor: "shared-iterations",
-            vus: 20,
-            iterations: 20,
+            vus: 40,
+            iterations: 40,
             options: {
                 browser: {
                     type: "chromium",
@@ -220,22 +220,27 @@ async function logout(page) {
 /**
  * Performs a checkout operation in Koha
  * @param {Object} page - The page object to perform the checkout on
- * @param {Object} borrower - The borrower object containing patron information
- * @param {string} borrower.patron_id - The patron ID
- * @param {string} borrower.cardnumber - The patron's card number
+ * @param {Object} patron - The borrower object containing patron information
+ * @param {string} patron.patron_id - The patron ID
+ * @param {string} patron.cardnumber - The patron's card number
  * @param {Object} item - The item to check out
  * @param {string} item.external_id - The item's barcode
  * @returns {Promise<void>}
  */
-async function checkout(page, borrower, item) {
-    const borrowernumber = borrower.patron_id;
-    const cardnumber = borrower.cardnumber;
+async function checkout(page, patron, item) {
+    const patron_id = patron.patron_id;
+    const cardnumber = patron.cardnumber;
     const barcode = item.external_id;
-    console.log(`Check out ${barcode} to ${cardnumber} (${borrowernumber})`);
+    console.log(`Check out ${barcode} to ${cardnumber} (${patron_id})`);
 
-    const url_circulation = `${STAFF_BASE_URL}/cgi-bin/koha/circ/circulation.pl?borrowernumber=${borrowernumber}`;
+    const url_circulation = `${STAFF_BASE_URL}/cgi-bin/koha/circ/circulation.pl?borrowernumber=${patron_id}`;
     console.log(`Go to ${url_circulation}`);
-    await page.goto(url_circulation);
+    try {
+        await page.goto(url_circulation);
+    } catch (error) {
+        console.error(`Failed to go to ${url_circulation}:`, error, "PATRON: ", patron );
+        await page.screenshot({ path: `failed_goto_circulation_${patron_id}.png` });
+    }
 
     // If the account is restricted, override it
     const overrideLink = page.locator('a', { hasText: 'Override restriction temporarily' });
@@ -249,8 +254,6 @@ async function checkout(page, borrower, item) {
         console.log('Found "Force checkout" button, clicking it...');
         await Promise.all([yesCheckOutBtn.click(), page.waitForNavigation()]);
     }
-
-    await page.waitForSelector("label.circ_barcode", { timeout: 10000 });
 
     try {
         const checkingOutTo = await page.locator("label.circ_barcode").first().textContent();
@@ -291,7 +294,12 @@ async function checkin(page, item) {
 
     const url_circulation = `${STAFF_BASE_URL}/cgi-bin/koha/circ/returns.pl`;
     console.log(`Go to ${url_circulation}`);
+    try {
     await page.goto(url_circulation);
+    } catch (error) {
+        console.error(`Failed to go to ${url_circulation}:`, error);
+        await page.screenshot({ path: `failed_goto_returns_${barcode}.png` });
+    }
 
     await page.waitForSelector("body");
 
@@ -377,6 +385,7 @@ function createStubKohaItem(data, biblioId) {
             throw new Error("Failed to create item");
         }
     }
+    console.log("Created item: ", itemId);
 
     return itemId;
 }
@@ -487,7 +496,7 @@ function createStubKohaBiblio(data) {
             throw new Error("Failed to create biblio");
         }
     }
-
+    console.log("Created biblio: ", biblio.id, biblio);
     return biblio;
 }
 /**
@@ -544,7 +553,7 @@ function createStubKohaPatron(data) {
             throw new Error("Failed to create patron");
         }
     }
-    
+    console.log("Created patron: ", patron.patron_id, patron);
     return patron;
 }
 
