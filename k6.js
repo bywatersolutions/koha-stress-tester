@@ -11,8 +11,8 @@ export const options = {
   scenarios: {
     ui: {
       executor: "shared-iterations",
-      vus: 10,
-      iterations: 10,
+      vus: 40,
+      iterations: 40,
       options: {
         browser: {
           type: "chromium",
@@ -104,19 +104,19 @@ export default async function (data) {
   console.log("Logged in to Koha");
 
   try {
-    sleep(Math.random() * 10);
-    const patron = createStubKohaPatron(data);
-    sleep(Math.random() * 10);
-    const biblio = createStubKohaBiblio(data);
-    sleep(Math.random() * 10);
-    const item = createStubKohaItem(data, biblio.id);
+    await sleep(Math.random() * 10);
+    const patron = await createStubKohaPatron(data);
+    await sleep(Math.random() * 10);
+    const biblio = await createStubKohaBiblio(data);
+    await sleep(Math.random() * 10);
+    const item = await createStubKohaItem(data, biblio.id);
 
     // Check in item, check out item, check it back in
-    sleep(Math.random() * 3);
+    await sleep(Math.random() * 3);
     await checkin(page, item);
-    sleep(Math.random() * 3);
+    await sleep(Math.random() * 3);
     await checkout(page, patron, item);
-    sleep(Math.random() * 3);
+    await sleep(Math.random() * 3);
     await checkin(page, item);
 
     // Search OPAC
@@ -124,9 +124,9 @@ export default async function (data) {
     console.log("Using search term:", searchTerm);
     await search_opac(searchTerm, page);
 
-    deleteKohaItem(item.item_id);
-    deleteKohaBiblio(biblio.id);
-    deleteKohaPatron(patron.patron_id);
+    await deleteKohaItem(item.item_id);
+    await deleteKohaBiblio(biblio.id);
+    await deleteKohaPatron(patron.patron_id);
   } catch (error) {
     console.error("ERROR! ERROR! ERROR!", error.message);
     if (page) {
@@ -386,7 +386,7 @@ async function search_opac(term, page) {
  * @param {number} biblioId - The biblio ID to associate the item with
  * @returns {Object} The created item data
  */
-function createStubKohaItem(data, biblioId) {
+async function createStubKohaItem(data, biblioId) {
   const externalId = randomBarcode();
   const itemTypeId = data.itemTypes[0].item_type_id;
   const homeLibraryId = data.libraries[1].library_id;
@@ -405,7 +405,7 @@ function createStubKohaItem(data, biblioId) {
   let loops = 0;
   let itemId;
   while (!itemId) {
-    itemId = createKohaItem(biblioId, item);
+    itemId = await createKohaItem(biblioId, item);
     sleep(loops);
     loops++;
     if (loops > 10) {
@@ -423,7 +423,7 @@ function createStubKohaItem(data, biblioId) {
  * @param {Object} itemData - The item data to create
  * @returns {Object} The created item data
  */
-function createKohaItem(biblioId, itemData) {
+async function createKohaItem(biblioId, itemData) {
   const url = `${API}/biblios/${biblioId}/items`;
   const payload = JSON.stringify(itemData);
   const headers = {
@@ -444,7 +444,7 @@ function createKohaItem(biblioId, itemData) {
  * @param {number} itemId - The ID of the item to delete
  * @returns {void}
  */
-function deleteKohaItem(itemId) {
+async function deleteKohaItem(itemId) {
   const url = `${API}/items/${itemId}`;
   const res = http.del(url);
   check(res, {
@@ -458,7 +458,7 @@ function deleteKohaItem(itemId) {
  * @param {number} biblioId - The ID of the biblio record to delete
  * @returns {void}
  */
-function deleteKohaBiblio(biblioId) {
+async function deleteKohaBiblio(biblioId) {
   const url = `${API}/biblios/${biblioId}`;
   const res = http.del(url);
   check(res, {
@@ -472,7 +472,7 @@ function deleteKohaBiblio(biblioId) {
  * @param {Object} data - Data object from setup
  * @returns {Object} The created biblio record
  */
-function createStubKohaBiblio(data) {
+async function createStubKohaBiblio(data) {
   const biblioData = {
     leader: "00000nam a2200000 i 4500",
     fields: [
@@ -509,7 +509,7 @@ function createStubKohaBiblio(data) {
   let biblio;
   let loops = 0;
   while (!biblio) {
-    biblio = createKohaBiblio(biblioData);
+    biblio = await createKohaBiblio(biblioData);
     sleep(loops);
     loops++;
     if (loops > 10) {
@@ -524,7 +524,7 @@ function createStubKohaBiblio(data) {
  * @param {Object} record - The MARC record data in MARC-in-JSON format
  * @returns {Object} The created biblio record
  */
-function createKohaBiblio(record) {
+async function createKohaBiblio(record) {
   const url = `${API}/biblios`;
   const payload = JSON.stringify(record);
   const headers = {
@@ -549,7 +549,7 @@ function createKohaBiblio(record) {
  * @param {Array<Object>} data.libraries - List of libraries
  * @returns {Object} The created patron data
  */
-function createStubKohaPatron(data) {
+async function createStubKohaPatron(data) {
   const patron_category_id = data.patronCategories[0].patron_category_id;
   const library_id = data.libraries[1].library_id;
 
@@ -566,7 +566,7 @@ function createStubKohaPatron(data) {
   let patron;
   let loops = 0;
   while (!patron) {
-    patron = createKohaPatron(patronData);
+    patron = await createKohaPatron(patronData);
     sleep(loops);
     loops++;
     if (loops > 10) {
@@ -588,7 +588,7 @@ function createStubKohaPatron(data) {
  * @param {string} patronData.dateofbirth - The patron's date of birth (YYYY-MM-DD)
  * @returns {Object} The created patron data
  */
-function createKohaPatron(patronData) {
+async function createKohaPatron(patronData) {
   console.log("createKohaPatron", patronData);
 
   const url = `${API}/patrons`;
@@ -628,10 +628,10 @@ function createKohaPatron(patronData) {
  * @param {number} patronId - The ID of the patron to delete
  * @returns {void}
  */
-function deleteKohaPatron(patronId) {
+async function deleteKohaPatron(patronId) {
   const url = `${API}/patrons/${patronId}`;
 
-  const res = http.del(url); // 'null' for the body as DELETE requests usually don't send one
+  const res = await http.del(url); // 'null' for the body as DELETE requests usually don't send one
 
   check(res, {
     "Patron deleted": (r) => r.status === 204,
