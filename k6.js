@@ -357,6 +357,7 @@ function createStubKohaItem(data, biblioId) {
         item_type_id: itemTypeId,
         home_library_id: homeLibraryId,
         holding_library_id: holdingLibraryId,
+        callnumber: 'KohaStressTest',
     };
     console.log("Creating item: ", item);
     return createKohaItem(biblioId, item);
@@ -423,7 +424,7 @@ function createStubKohaBiblio(data) {
     const biblio = {
         "leader": "00000nam a2200000 i 4500",
         "fields": [
-            { "001": "123456" },
+            { "001": "KohaStressTest" },
             { "005": "20250101000000.0" },
             { "008": "250120s2025    xx            000 0 eng d" },
             {
@@ -501,7 +502,7 @@ function createStubKohaPatron(data) {
         "library_id": library_id,
         "category_id": patron_category_id,
         "date_of_birth": "1990-01-01",
-        "statistics_1": "Koha Stress Test",
+        "statistics_1": "KohaStressTest",
     };
 
     return createKohaPatron(patron);
