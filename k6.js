@@ -11,8 +11,8 @@ export const options = {
     scenarios: {
         ui: {
             executor: "shared-iterations",
-            vus: 10,
-            iterations: 10,
+            vus: 20,
+            iterations: 20,
             options: {
                 browser: {
                     type: "chromium",
@@ -367,7 +367,16 @@ function createStubKohaItem(data, biblioId) {
 
     console.log("Creating item: ", item);
 
-    const itemId = createKohaItem(biblioId, item);
+    let loops = 0;
+    let itemId;
+    while ( !itemId ) {
+        itemId = createKohaItem(biblioId, item);
+        sleep(loops);
+        loops++;
+        if (loops > 10) {
+            throw new Error("Failed to create item");
+        }
+    }
 
     return itemId;
 }
@@ -429,7 +438,7 @@ function deleteKohaBiblio(biblioId) {
  * @returns {Object} The created biblio record
  */
 function createStubKohaBiblio(data) {
-    const biblio = {
+    const biblioData = {
         "leader": "00000nam a2200000 i 4500",
         "fields": [
             { "001": "KohaStressTest" },
@@ -468,7 +477,18 @@ function createStubKohaBiblio(data) {
         ]
     };
 
-    return createKohaBiblio(biblio);
+    let biblio;
+    let loops = 0;
+    while ( !biblio ) {
+        biblio = createKohaBiblio(biblioData);
+        sleep(loops);
+        loops++;
+        if (loops > 10) {
+            throw new Error("Failed to create biblio");
+        }
+    }
+
+    return biblio;
 }
 /**
  * Creates a new Koha biblio record via the API
@@ -514,7 +534,16 @@ function createStubKohaPatron(data) {
         "statistics_1": "KohaStressTest",
     };
 
-    const patron = createKohaPatron(patronData);
+    let patron;
+    let loops = 0;
+    while ( !patron ) {
+        patron = createKohaPatron(patronData);
+        sleep(loops);
+        loops++;
+        if (loops > 10) {
+            throw new Error("Failed to create patron");
+        }
+    }
     
     return patron;
 }
