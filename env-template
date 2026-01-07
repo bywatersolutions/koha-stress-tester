@@ -1,0 +1,48 @@
+# ============================================================
+# Stress Testing Environment Configuration
+# ============================================================
+# COPY THIS TO .env AND CONFIGURE
+# ============================================================
+
+# SCRIPT: Which test script to run
+#   - aspen_http.js  (Aspen, HTTP mode for headless servers)
+#   - aspen.js       (Aspen, browser mode)
+#   - koha.js        (Koha, browser mode)
+SCRIPT=aspen_http.js
+
+# K6_IMAGE_TAG: Docker image to use
+#   - latest              (HTTP mode, smaller image)
+#   - latest-with-browser (browser mode)
+K6_IMAGE_TAG=latest
+
+# ============================================================
+# k6 Test Parameters
+# ============================================================
+VUS=1
+ITERATIONS=1
+
+# ============================================================
+# Aspen Discovery Configuration
+# ============================================================
+# Used with aspen.js or aspen_http.js
+
+BASE_URL=https://localhost
+
+# If BASE_URL is localhost, set HOST_HEADER to the real domain
+HOST_HEADER=INST.aspendiscovery.org
+
+# Number of search results to click through per iteration
+RESULTS_TO_CLICK=5
+
+# ============================================================
+# Koha Configuration
+# ============================================================
+# Used with koha.js
+
+STAFF_URL=https://kohadev-intra.localhost
+OPAC_URL=https://kohadev.localhost
+
+# Staff user credentials for API access and login
+STAFF_USER=koha
+STAFF_PASS=koha
+

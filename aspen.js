@@ -29,16 +29,16 @@ export const options = {
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
 // ------------------------------------------------------------
-// Split the BASE URL into protocol and host parts
-const URL = __ENV.URL || "http://aspen-discovery.localhost";
+const BASE_URL = __ENV.BASE_URL || "https://localhost";
+const HOST_HEADER = __ENV.HOST_HEADER || "aspen-discovery.localhost";
 const RESULTS_TO_CLICK = __ENV.RESULTS_TO_CLICK || 5;
 
 // Read all words from the file
 const words = open("./words_alpha.txt").split("\r\n");
 
-export function setup() { }
+export function setup() {}
 
-export function teardown(data) { }
+export function teardown(data) {}
 
 /**
  * Main test function that runs for each VU (Virtual User)
@@ -50,27 +50,29 @@ export default async function (data) {
   console.log(searchTerm);
 
   const page = await browser.newPage();
-  await page.goto(URL);
+  await page.setExtraHTTPHeaders({ Host: HOST_HEADER });
+  await page.goto(BASE_URL);
 
   // Type into search box
-  const lookforInput = page.locator('#lookfor');
+  const lookforInput = page.locator("#lookfor");
   await lookforInput.type(searchTerm);
 
   // Click Search button
-  const searchButton = page.locator('#horizontal-search-button-container button');
+  const searchButton = page.locator(
+    "#horizontal-search-button-container button",
+  );
   await Promise.all([
     page.waitForNavigation(),
     searchButton.click({ force: true }),
   ]);
 
   // Find results
-  const locator = await page.locator('.result-title');
+  const locator = await page.locator(".result-title");
   const count = await locator.count();
   console.log("Search term:", searchTerm);
   console.log("Results found:", count);
 
   if (count > 0) {
-
     for (let i = 0; i < RESULTS_TO_CLICK; i++) {
       // Pick random index
       const idx = Math.floor(Math.random() * count);
@@ -85,7 +87,7 @@ export default async function (data) {
       ]);
 
       // Wait for page to load
-      await page.waitForSelector('#main-content');
+      await page.waitForSelector("#main-content");
 
       await page.locator("#returnToSearch a").click();
     }
@@ -104,3 +106,4 @@ export default async function (data) {
 function rando(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
+
