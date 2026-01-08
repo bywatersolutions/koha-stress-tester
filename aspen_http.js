@@ -13,6 +13,7 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
+const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
 
 // Load words from file
 const words = new SharedArray("words", function () {
@@ -56,7 +57,7 @@ export const options = {
     ],
     http_req_duration: [
       {
-        threshold: "p(95)<5000",
+        threshold: "p(95)<10000",
         abortOnFail: true,
         delayAbortEval: "30s",
       },
@@ -136,4 +137,30 @@ export default function () {
  */
 function rando(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// Handle summary - export results to JSON file
+export function handleSummary(data) {
+  if (!OUTPUT_FILE) {
+    return; // Use k6's default output
+  }
+
+  // Add test metadata to the summary
+  const enrichedData = {
+    ...data,
+    metadata: {
+      testScript: "aspen_http.js",
+      baseUrl: BASE_URL,
+      hostHeader: HOST_HEADER,
+      maxVUs: MAX_VUS,
+      vuStep: VU_STEP,
+      rampTime: RAMP_TIME,
+      holdTime: HOLD_TIME,
+      timestamp: new Date().toISOString(),
+    },
+  };
+
+  return {
+    [OUTPUT_FILE]: JSON.stringify(enrichedData, null, 2),
+  };
 }

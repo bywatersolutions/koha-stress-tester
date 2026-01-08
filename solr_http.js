@@ -19,6 +19,7 @@ const HOLD_TIME = __ENV.HOLD_TIME || "5s";
 const STATS_INTERVAL = parseInt(__ENV.STATS_INTERVAL) || 10; // seconds between stats collection
 const HARD_TIMEOUT = __ENV.HARD_TIMEOUT || "30m"; // Hard timeout - ends test regardless of state
 const HOLD_ON_FAIL = __ENV.HOLD_ON_FAIL || "30s"; // Time to collect stats after threshold crossed
+const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
 
 // Load words from file
 const words = new SharedArray("words", function () {
@@ -263,4 +264,30 @@ export function teardown() {
   console.log(`TEST COMPLETE`);
   console.log(`========================================`);
   collectSolrMetrics("FINAL");
+}
+
+// Handle summary - export results to JSON file
+export function handleSummary(data) {
+  if (!OUTPUT_FILE) {
+    return; // Use k6's default output
+  }
+
+  // Add test metadata to the summary
+  const enrichedData = {
+    ...data,
+    metadata: {
+      testScript: "solr_http.js",
+      solrUrl: SOLR_URL,
+      solrCore: SOLR_CORE,
+      maxVUs: MAX_VUS,
+      vuStep: VU_STEP,
+      rampTime: RAMP_TIME,
+      holdTime: HOLD_TIME,
+      timestamp: new Date().toISOString(),
+    },
+  };
+
+  return {
+    [OUTPUT_FILE]: JSON.stringify(enrichedData, null, 2),
+  };
 }

@@ -48,6 +48,10 @@ STATS_INTERVAL=10
 HARD_TIMEOUT=30m
 HOLD_ON_FAIL=30s
 
+# Output file for JSON results (leave empty for no file output)
+# File is written to ./output/ directory
+OUTPUT_FILE=/output/results.json
+
 # ============================================================
 # Solr Cloud Configuration
 # ============================================================

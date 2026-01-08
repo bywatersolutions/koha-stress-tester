@@ -38,3 +38,7 @@ inc/
 
 # Container
 .env
+
+# Test output (keep directory, ignore results)
+output/*
+!output/.gitkeep

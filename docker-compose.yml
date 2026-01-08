@@ -9,4 +9,5 @@ services:
     volumes:
       - ./${SCRIPT}:/scripts/script.js:ro
       - ./words_alpha.txt:/scripts/words_alpha.txt:ro
+      - ./output:/output
     command: run /scripts/script.js
