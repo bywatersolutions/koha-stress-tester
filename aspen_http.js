@@ -9,40 +9,43 @@ import { SharedArray } from "k6/data";
 const BASE_URL = __ENV.BASE_URL || "https://localhost";
 const HOST_HEADER = __ENV.HOST_HEADER || "aspen-discovery.localhost";
 const RESULTS_TO_CLICK = __ENV.RESULTS_TO_CLICK || 5;
+const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
+const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
+const RAMP_TIME = __ENV.RAMP_TIME || "5s";
+const HOLD_TIME = __ENV.HOLD_TIME || "5s";
 
 // Load words from file
 const words = new SharedArray("words", function () {
   return open("./words_alpha.txt").split(/\r?\n/).filter(w => w.trim());
 });
 
-// Default headers with Host override
-const headers = {
-  Host: HOST_HEADER,
-  "User-Agent": "k6-stress-test",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+// Default request params
+const params = {
+  headers: {
+    Host: HOST_HEADER,
+    "User-Agent": "k6-stress-test",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  },
+  timeout: "6s",  // Fail fast instead of hanging
 };
 
 // ------------------------------------------------------------
-// TEST CONFIG - Staged ramp-up by 50 VUs, 1 min holds
+// Generate stages dynamically: ramp by VU_STEP, hold, repeat until MAX_VUS
 // Aborts when failure rate exceeds 5%
 // ------------------------------------------------------------
+function generateStages() {
+  const stages = [];
+  for (let vus = VU_STEP; vus <= MAX_VUS; vus += VU_STEP) {
+    stages.push({ duration: RAMP_TIME, target: vus });
+    stages.push({ duration: HOLD_TIME, target: vus });
+  }
+  stages.push({ duration: RAMP_TIME, target: 0 }); // Ramp down
+  return stages;
+}
+
 export const options = {
   insecureSkipTLSVerify: true,
-  stages: [
-    { duration: "30s", target: 50 },    // Ramp to 50
-    { duration: "1m", target: 50 },     // Hold at 50
-    { duration: "30s", target: 100 },   // Ramp to 100
-    { duration: "1m", target: 100 },    // Hold at 100
-    { duration: "30s", target: 150 },   // Ramp to 150
-    { duration: "1m", target: 150 },    // Hold at 150
-    { duration: "30s", target: 200 },   // Ramp to 200
-    { duration: "1m", target: 200 },    // Hold at 200
-    { duration: "30s", target: 250 },   // Ramp to 250
-    { duration: "1m", target: 250 },    // Hold at 250
-    { duration: "30s", target: 300 },   // Ramp to 300
-    { duration: "1m", target: 300 },    // Hold at 300
-    { duration: "30s", target: 0 },     // Ramp down
-  ],
+  stages: generateStages(),
   thresholds: {
     http_req_failed: [
       {
@@ -51,14 +54,21 @@ export const options = {
         delayAbortEval: "30s",
       },
     ],
-    http_req_duration: ["p(95)<2000"],
+    http_req_duration: [
+      {
+        threshold: "p(95)<5000",
+        abortOnFail: true,
+        delayAbortEval: "30s",
+      },
+    ],
   },
 };
 
 export function setup() {
   console.log(`BASE_URL: ${BASE_URL}`);
   console.log(`HOST_HEADER: ${HOST_HEADER}`);
-  console.log(`Staged stress test - ramps by 50 VUs, holds 1 min each`);
+  console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
+  console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
   console.log(`Aborts when failure rate exceeds 5%`);
 }
 
@@ -71,7 +81,7 @@ export default function () {
   const searchTerm = words[Math.floor(Math.random() * words.length)];
 
   // Load homepage
-  const homeRes = http.get(BASE_URL, { headers });
+  const homeRes = http.get(BASE_URL, params);
   check(homeRes, {
     "homepage loaded": (r) => r.status === 200,
   });
@@ -80,7 +90,7 @@ export default function () {
 
   // Perform search
   const searchUrl = `${BASE_URL}/Union/Search?view=list&lookfor=${encodeURIComponent(searchTerm)}&searchIndex=Keyword&searchSource=local`;
-  const searchRes = http.get(searchUrl, { headers });
+  const searchRes = http.get(searchUrl, params);
   check(searchRes, {
     "search completed": (r) => r.status === 200,
     "response < 500ms": (r) => r.timings.duration < 500,
@@ -110,7 +120,7 @@ export default function () {
       recordUrl = `${BASE_URL}${recordUrl}`;
     }
 
-    const recordRes = http.get(recordUrl, { headers });
+    const recordRes = http.get(recordUrl, params);
     check(recordRes, {
       "record loaded": (r) => r.status === 200,
     });

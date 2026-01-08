@@ -8,6 +8,7 @@
 #   - aspen_http.js  (Aspen, HTTP mode for headless servers)
 #   - aspen.js       (Aspen, browser mode)
 #   - koha.js        (Koha, browser mode)
+#   - solr_http.js   (Solr Cloud direct queries)
 SCRIPT=aspen_http.js
 
 # K6_IMAGE_TAG: Docker image to use
@@ -35,6 +36,29 @@ HOST_HEADER=INST.aspendiscovery.org
 RESULTS_TO_CLICK=5
 
 # ============================================================
+# Staged Load Test Parameters
+# ============================================================
+# Used with aspen_http.js and solr_http.js
+
+MAX_VUS=300
+VU_STEP=10
+RAMP_TIME=5s
+HOLD_TIME=5s
+STATS_INTERVAL=10
+HARD_TIMEOUT=30m
+HOLD_ON_FAIL=30s
+
+# ============================================================
+# Solr Cloud Configuration
+# ============================================================
+# Used with solr_http.js
+
+SOLR_URL=http://solr.gke.aspendiscovery.org
+SOLR_CORE=grouped_works_v2
+SOLR_USER=
+SOLR_PASS=
+
+# ============================================================
 # Koha Configuration
 # ============================================================
 # Used with koha.js
@@ -45,4 +69,3 @@ OPAC_URL=https://kohadev.localhost
 # Staff user credentials for API access and login
 STAFF_USER=koha
 STAFF_PASS=koha
-
