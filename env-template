@@ -55,9 +55,10 @@ STATS_INTERVAL=10
 HARD_TIMEOUT=30m
 HOLD_ON_FAIL=30s
 
-# Output file for JSON results (leave empty for timestamped files)
+# Output file for JSON results (leave empty for auto-generated names)
 # File is written to ./output/ directory
-# Examples: /output/results.json or leave empty for /output/solr-2026-01-08T12-00-00Z.json
+# Format: script-testnumber-shortdate-time.json (e.g., solr-001-20260108-2345.json)
+# Test number auto-increments based on existing files in output/
 OUTPUT_FILE=
 
 # ============================================================

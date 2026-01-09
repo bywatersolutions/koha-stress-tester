@@ -20,6 +20,7 @@ const STATS_INTERVAL = parseInt(__ENV.STATS_INTERVAL) || 10; // seconds between 
 const HARD_TIMEOUT = __ENV.HARD_TIMEOUT || "30m"; // Hard timeout - ends test regardless of state
 const HOLD_ON_FAIL = __ENV.HOLD_ON_FAIL || "30s"; // Time to collect stats after threshold crossed
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
+const TEST_NUMBER = __ENV.TEST_NUMBER || "001"; // Test number for output filename
 
 // Load words from file
 const words = new SharedArray("words", function () {
@@ -32,6 +33,9 @@ const solrNumFound = new Trend("solr_num_found", true);    // Results count
 const solrQTimeOver100 = new Counter("solr_qtime_over_100ms");
 const solrQTimeOver500 = new Counter("solr_qtime_over_500ms");
 const solrQTimeOver1000 = new Counter("solr_qtime_over_1000ms");
+
+// Module-level storage for system info (captured in setup, used in handleSummary)
+let __solrSystemInfo = null;
 
 // Build auth header if credentials provided
 function getHeaders() {
@@ -130,8 +134,55 @@ export function setup() {
   console.log(`Aborts on >2% failures or p(95)>5s`);
   console.log(`========================================`);
   
+  // Capture Solr system info for the report
+  let solrSystemInfo = null;
+  try {
+    const sysInfoUrl = `${SOLR_URL}/solr/admin/info/system?wt=json`;
+    const res = http.get(sysInfoUrl, { headers, timeout: "10s" });
+    if (res.status === 200) {
+      const info = JSON.parse(res.body);
+      solrSystemInfo = {
+        mode: info.mode,
+        solrVersion: info.lucene?.["solr-spec-version"],
+        luceneVersion: info.lucene?.["lucene-spec-version"],
+        jvmVersion: info.jvm?.version,
+        jvmName: info.jvm?.vm?.name,
+        processors: info.jvm?.processors,
+        memory: {
+          max: info.jvm?.memory?.max,
+          total: info.jvm?.memory?.total,
+          used: info.jvm?.memory?.used,
+          free: info.jvm?.memory?.free,
+        },
+        jvmArgs: info.jvm?.jmx?.commandLineArgs,
+        uptime_ms: info.jvm?.jmx?.upTimeMS,
+        startTime: info.jvm?.jmx?.startTime,
+        system: {
+          name: info.system?.name,
+          arch: info.system?.arch,
+          processors: info.system?.availableProcessors,
+          loadAverage: info.system?.systemLoadAverage,
+          totalPhysicalMemory: info.system?.totalPhysicalMemorySize,
+          freePhysicalMemory: info.system?.freePhysicalMemorySize,
+        },
+        node: info.node,
+        zkHost: info.zkHost,
+      };
+      console.log(`Solr version: ${solrSystemInfo.solrVersion}`);
+      console.log(`JVM memory max: ${solrSystemInfo.memory.max}`);
+      console.log(`Processors: ${solrSystemInfo.processors}`);
+    }
+  } catch (e) {
+    console.log(`Warning: Could not fetch Solr system info: ${e.message}`);
+  }
+  
+  // Store for handleSummary access
+  __solrSystemInfo = solrSystemInfo;
+  
   // Initial stats snapshot
   collectSolrMetrics("BASELINE");
+  
+  return { solrSystemInfo };
 }
 
 // Main load test function
@@ -337,14 +388,28 @@ export function handleSummary(data) {
   const summary = {
     metadata: {
       testScript: "solr_http.js",
+      testNumber: TEST_NUMBER,
+      timestamp: new Date().toISOString(),
+    },
+    config: {
       solrUrl: SOLR_URL,
       solrCore: SOLR_CORE,
-      maxVUsConfigured: MAX_VUS,
+      solrUser: SOLR_USER ? "(set)" : "(not set)",
+      maxVUs: MAX_VUS,
       vuStep: VU_STEP,
       rampTime: RAMP_TIME,
       holdTime: HOLD_TIME,
-      timestamp: new Date().toISOString(),
+      statsInterval: STATS_INTERVAL,
+      hardTimeout: HARD_TIMEOUT,
+      holdOnFail: HOLD_ON_FAIL,
+      requestTimeout: "6s",
     },
+    thresholds: {
+      httpReqFailed: "rate<0.02 (2%)",
+      httpReqDuration: "p(95)<5000ms",
+      solrQtime: "p(95)<2000ms",
+    },
+    solrSystem: __solrSystemInfo,
     result: {
       peakVUs: m.vus?.values?.max || 0,
       configuredMaxVUs: MAX_VUS,
@@ -401,11 +466,11 @@ export function handleSummary(data) {
     }
   }
 
-  // Generate timestamped filename if not specified
+  // Generate filename: script-testnumber-shortdate-time.json
   const now = new Date();
-  const date = now.toISOString().slice(0, 10);
-  const time = now.toISOString().slice(11, 19).replace(/:/g, "-");
-  const outputPath = OUTPUT_FILE || `/output/solr-${date}-${time}.json`;
+  const shortDate = now.toISOString().slice(0, 10).replace(/-/g, "");
+  const time = now.toISOString().slice(11, 16).replace(/:/g, "");
+  const outputPath = OUTPUT_FILE || `/output/solr-${TEST_NUMBER}-${shortDate}-${time}.json`;
 
   // Add filename to console output
   const consoleOutput = formatSummary(data) + `  Output: ${outputPath}\n`;

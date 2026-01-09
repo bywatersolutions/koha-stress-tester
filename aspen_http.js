@@ -14,6 +14,7 @@ const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
+const TEST_NUMBER = __ENV.TEST_NUMBER || "001"; // Test number for output filename
 
 // Load words from file
 const words = new SharedArray("words", function () {
@@ -206,13 +207,22 @@ export function handleSummary(data) {
   const summary = {
     metadata: {
       testScript: "aspen_http.js",
+      testNumber: TEST_NUMBER,
+      timestamp: new Date().toISOString(),
+    },
+    config: {
       baseUrl: BASE_URL,
       hostHeader: HOST_HEADER,
-      maxVUsConfigured: MAX_VUS,
+      resultsToClick: RESULTS_TO_CLICK,
+      maxVUs: MAX_VUS,
       vuStep: VU_STEP,
       rampTime: RAMP_TIME,
       holdTime: HOLD_TIME,
-      timestamp: new Date().toISOString(),
+      requestTimeout: "6s",
+    },
+    thresholds: {
+      httpReqFailed: "rate<0.05 (5%)",
+      httpReqDuration: "p(95)<10000ms",
     },
     result: {
       peakVUs: m.vus?.values?.max || 0,
@@ -261,11 +271,11 @@ export function handleSummary(data) {
     }
   }
 
-  // Generate timestamped filename if not specified
+  // Generate filename: script-testnumber-shortdate-time.json
   const now = new Date();
-  const date = now.toISOString().slice(0, 10);
-  const time = now.toISOString().slice(11, 19).replace(/:/g, "-");
-  const outputPath = OUTPUT_FILE || `/output/aspen-${date}-${time}.json`;
+  const shortDate = now.toISOString().slice(0, 10).replace(/-/g, "");
+  const time = now.toISOString().slice(11, 16).replace(/:/g, "");
+  const outputPath = OUTPUT_FILE || `/output/aspen-${TEST_NUMBER}-${shortDate}-${time}.json`;
 
   // Add filename to console output
   const consoleOutput = formatSummary(data) + `  Output: ${outputPath}\n`;

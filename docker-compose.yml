@@ -9,4 +9,10 @@ services:
       - ./${SCRIPT}:/scripts/script.js:ro
       - ./words_alpha.txt:/scripts/words_alpha.txt:ro
       - ./output:/output
-    command: run /scripts/script.js
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        export TEST_NUMBER=$$(printf "%03d" $$(($$(ls -1 /output/*.json 2>/dev/null | wc -l) + 1)))
+        echo "Test number: $$TEST_NUMBER"
+        k6 run /scripts/script.js
