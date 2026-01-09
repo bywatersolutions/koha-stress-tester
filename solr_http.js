@@ -34,8 +34,6 @@ const solrQTimeOver100 = new Counter("solr_qtime_over_100ms");
 const solrQTimeOver500 = new Counter("solr_qtime_over_500ms");
 const solrQTimeOver1000 = new Counter("solr_qtime_over_1000ms");
 
-// Module-level storage for system info (captured in setup, used in handleSummary)
-let __solrSystemInfo = null;
 
 // Build auth header if credentials provided
 function getHeaders() {
@@ -134,55 +132,23 @@ export function setup() {
   console.log(`Aborts on >2% failures or p(95)>5s`);
   console.log(`========================================`);
   
-  // Capture Solr system info for the report
-  let solrSystemInfo = null;
+  // Fetch and display key Solr system info
   try {
     const sysInfoUrl = `${SOLR_URL}/solr/admin/info/system?wt=json`;
     const res = http.get(sysInfoUrl, { headers, timeout: "10s" });
     if (res.status === 200) {
       const info = JSON.parse(res.body);
-      solrSystemInfo = {
-        mode: info.mode,
-        solrVersion: info.lucene?.["solr-spec-version"],
-        luceneVersion: info.lucene?.["lucene-spec-version"],
-        jvmVersion: info.jvm?.version,
-        jvmName: info.jvm?.vm?.name,
-        processors: info.jvm?.processors,
-        memory: {
-          max: info.jvm?.memory?.max,
-          total: info.jvm?.memory?.total,
-          used: info.jvm?.memory?.used,
-          free: info.jvm?.memory?.free,
-        },
-        jvmArgs: info.jvm?.jmx?.commandLineArgs,
-        uptime_ms: info.jvm?.jmx?.upTimeMS,
-        startTime: info.jvm?.jmx?.startTime,
-        system: {
-          name: info.system?.name,
-          arch: info.system?.arch,
-          processors: info.system?.availableProcessors,
-          loadAverage: info.system?.systemLoadAverage,
-          totalPhysicalMemory: info.system?.totalPhysicalMemorySize,
-          freePhysicalMemory: info.system?.freePhysicalMemorySize,
-        },
-        node: info.node,
-        zkHost: info.zkHost,
-      };
-      console.log(`Solr version: ${solrSystemInfo.solrVersion}`);
-      console.log(`JVM memory max: ${solrSystemInfo.memory.max}`);
-      console.log(`Processors: ${solrSystemInfo.processors}`);
+      console.log(`Solr version: ${info.lucene?.["solr-spec-version"]}`);
+      console.log(`JVM memory max: ${info.jvm?.memory?.max}`);
+      console.log(`Processors: ${info.jvm?.processors}`);
+      console.log(`Mode: ${info.mode}`);
     }
   } catch (e) {
     console.log(`Warning: Could not fetch Solr system info: ${e.message}`);
   }
   
-  // Store for handleSummary access
-  __solrSystemInfo = solrSystemInfo;
-  
   // Initial stats snapshot
   collectSolrMetrics("BASELINE");
-  
-  return { solrSystemInfo };
 }
 
 // Main load test function
@@ -362,9 +328,26 @@ function formatSummary(data) {
   return lines.join("\n");
 }
 
+// Fetch Solr system info (used in handleSummary)
+function fetchSolrSystemInfo() {
+  try {
+    const sysInfoUrl = `${SOLR_URL}/solr/admin/info/system?wt=json`;
+    const res = http.get(sysInfoUrl, { headers, timeout: "10s" });
+    if (res.status === 200) {
+      return JSON.parse(res.body);
+    }
+  } catch (e) {
+    return { error: `Could not fetch: ${e.message}` };
+  }
+  return null;
+}
+
 // Handle summary - export results to JSON file (runs even on threshold abort)
 export function handleSummary(data) {
   const m = data.metrics;
+  
+  // Fetch Solr system info at end of test
+  const solrSystemInfo = fetchSolrSystemInfo();
   
   // Determine abort reason from thresholds
   let abortReason = null;
@@ -409,7 +392,7 @@ export function handleSummary(data) {
       httpReqDuration: "p(95)<5000ms",
       solrQtime: "p(95)<2000ms",
     },
-    solrSystem: __solrSystemInfo,
+    solrSystem: solrSystemInfo,
     result: {
       peakVUs: m.vus?.values?.max || 0,
       configuredMaxVUs: MAX_VUS,
