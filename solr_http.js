@@ -266,28 +266,106 @@ export function teardown() {
   collectSolrMetrics("FINAL");
 }
 
-// Handle summary - export results to JSON file
+// Simple summary formatter (no external dependencies)
+function formatSummary(data) {
+  const lines = [
+    "",
+    "=".repeat(60),
+    "TEST SUMMARY",
+    "=".repeat(60),
+  ];
+
+  const m = data.metrics;
+  if (m.http_reqs) lines.push(`  http_reqs...............: ${m.http_reqs.values.count}`);
+  if (m.http_req_duration) {
+    const d = m.http_req_duration.values;
+    lines.push(`  http_req_duration.......: avg=${d.avg?.toFixed(2)}ms p(95)=${d["p(95)"]?.toFixed(2)}ms max=${d.max?.toFixed(2)}ms`);
+  }
+  if (m.http_req_failed) lines.push(`  http_req_failed.........: ${(m.http_req_failed.values.rate * 100).toFixed(2)}%`);
+  if (m.solr_qtime) {
+    const q = m.solr_qtime.values;
+    lines.push(`  solr_qtime..............: avg=${q.avg?.toFixed(2)}ms p(95)=${q["p(95)"]?.toFixed(2)}ms`);
+  }
+  if (m.iterations) lines.push(`  iterations..............: ${m.iterations.values.count}`);
+  if (m.vus) lines.push(`  peak_vus................: ${m.vus.values.max}`);
+
+  lines.push("=".repeat(60));
+  lines.push("");
+  return lines.join("\n");
+}
+
+// Handle summary - export results to JSON file (runs even on threshold abort)
 export function handleSummary(data) {
-  if (!OUTPUT_FILE) {
-    return; // Use k6's default output
+  const m = data.metrics;
+  
+  // Determine abort reason from thresholds
+  let abortReason = null;
+  if (data.thresholds) {
+    for (const [name, threshold] of Object.entries(data.thresholds)) {
+      if (!threshold.ok) {
+        abortReason = `${name} threshold crossed`;
+        break;
+      }
+    }
   }
 
-  // Add test metadata to the summary
-  const enrichedData = {
-    ...data,
+  // Build clean, focused summary
+  const summary = {
     metadata: {
       testScript: "solr_http.js",
       solrUrl: SOLR_URL,
       solrCore: SOLR_CORE,
-      maxVUs: MAX_VUS,
+      maxVUsConfigured: MAX_VUS,
       vuStep: VU_STEP,
       rampTime: RAMP_TIME,
       holdTime: HOLD_TIME,
       timestamp: new Date().toISOString(),
     },
+    result: {
+      peakVUs: m.vus?.values?.max || 0,
+      configuredMaxVUs: MAX_VUS,
+      totalRequests: m.http_reqs?.values?.count || 0,
+      totalIterations: m.iterations?.values?.count || 0,
+      failureRate: `${((m.http_req_failed?.values?.rate || 0) * 100).toFixed(2)}%`,
+      abortReason: abortReason,
+    },
+    timing: {
+      avg_ms: m.http_req_duration?.values?.avg?.toFixed(2) || null,
+      med_ms: m.http_req_duration?.values?.med?.toFixed(2) || null,
+      p90_ms: m.http_req_duration?.values?.["p(90)"]?.toFixed(2) || null,
+      p95_ms: m.http_req_duration?.values?.["p(95)"]?.toFixed(2) || null,
+      max_ms: m.http_req_duration?.values?.max?.toFixed(2) || null,
+    },
+    solr: {
+      qtime_avg_ms: m.solr_qtime?.values?.avg?.toFixed(2) || null,
+      qtime_p95_ms: m.solr_qtime?.values?.["p(95)"]?.toFixed(2) || null,
+      qtime_max_ms: m.solr_qtime?.values?.max?.toFixed(2) || null,
+      slow_queries_over_100ms: m.solr_qtime_over_100ms?.values?.count || 0,
+      slow_queries_over_500ms: m.solr_qtime_over_500ms?.values?.count || 0,
+      slow_queries_over_1000ms: m.solr_qtime_over_1000ms?.values?.count || 0,
+      avg_results_found: m.solr_num_found?.values?.avg?.toFixed(0) || null,
+    },
+    checks: {},
   };
 
+  // Extract check pass rates
+  if (data.root_group?.checks) {
+    for (const check of data.root_group.checks) {
+      const total = check.passes + check.fails;
+      summary.checks[check.name] = {
+        passes: check.passes,
+        fails: check.fails,
+        rate: total > 0 ? `${((check.passes / total) * 100).toFixed(1)}%` : "N/A",
+      };
+    }
+  }
+
+  // Generate timestamped filename if not specified
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const outputPath = OUTPUT_FILE || `/output/solr-${timestamp}.json`;
+
   return {
-    [OUTPUT_FILE]: JSON.stringify(enrichedData, null, 2),
+    stdout: formatSummary(data),
+    [outputPath]: JSON.stringify(summary, null, 2),
   };
 }

@@ -4,6 +4,13 @@
 # COPY THIS TO .env AND CONFIGURE
 # ============================================================
 
+# ============================================================
+# Docker User (for rootless compatibility)
+# ============================================================
+# Run: id -u and id -g to get your values
+UID=1000
+GID=1000
+
 # SCRIPT: Which test script to run
 #   - aspen_http.js  (Aspen, HTTP mode for headless servers)
 #   - aspen.js       (Aspen, browser mode)
@@ -48,9 +55,10 @@ STATS_INTERVAL=10
 HARD_TIMEOUT=30m
 HOLD_ON_FAIL=30s
 
-# Output file for JSON results (leave empty for no file output)
+# Output file for JSON results (leave empty for timestamped files)
 # File is written to ./output/ directory
-OUTPUT_FILE=/output/results.json
+# Examples: /output/results.json or leave empty for /output/solr-2026-01-08T12-00-00Z.json
+OUTPUT_FILE=
 
 # ============================================================
 # Solr Cloud Configuration
