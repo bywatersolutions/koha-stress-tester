@@ -11,12 +11,12 @@
 UID=1000
 GID=1000
 
-# SCRIPT: Which test script to run
+# BENCH: Which benchmark to run
 #   - aspen_http.js  (Aspen, HTTP mode for headless servers)
 #   - aspen.js       (Aspen, browser mode)
 #   - koha.js        (Koha, browser mode)
 #   - solr_http.js   (Solr Cloud direct queries)
-SCRIPT=aspen_http.js
+BENCH=aspen_http.js
 
 # K6_IMAGE_TAG: Docker image to use
 #   - latest              (HTTP mode, smaller image)

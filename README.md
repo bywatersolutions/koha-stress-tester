@@ -24,12 +24,12 @@ sudo apt-get install k6
 
 ## Aspen Discovery Stress Test
 
-The `aspen_discovery.js` script simulates user traffic on an Aspen Discovery interface. It searches for random words from `words_alpha.txt`, clicks on results, and navigates back.
+The `benchmarks/aspen.js` script simulates user traffic on an Aspen Discovery interface. It searches for random words from `words_alpha.txt`, clicks on results, and navigates back.
 
 ### Usage
 
 ```bash
-k6 run aspen_discovery.js
+k6 run benchmarks/aspen.js
 ```
 
 ### Environment Variables
@@ -45,12 +45,12 @@ You can configure the test using the following environment variables:
 
 **Example:**
 ```bash
-k6 run -e URL=https://my-aspen-catalog.org -e RESULTS_TO_CLICK=3 aspen_discovery.js
+k6 run -e URL=https://my-aspen-catalog.org -e RESULTS_TO_CLICK=3 benchmarks/aspen.js
 ```
 
 ## Koha Stress Test
 
-The `koha.js` script simulates staff activity on the Koha staff interface and OPAC searches. It performs the following actions:
+The `benchmarks/koha.js` script simulates staff activity on the Koha staff interface and OPAC searches. It performs the following actions:
 1. Logs in to the staff interface.
 2. Creates a stub patron, biblio, and item via the API.
 3. Checks the item in, checks it out to the patron, and checks it in again.
@@ -60,7 +60,7 @@ The `koha.js` script simulates staff activity on the Koha staff interface and OP
 ### Usage
 
 ```bash
-k6 run koha.js
+k6 run benchmarks/koha.js
 ```
 
 ### Environment Variables
@@ -76,5 +76,5 @@ k6 run koha.js
 
 **Example:**
 ```bash
-k6 run -e STAFF_URL=http://staff.mylibrary.org -e STAFF_USER=admin -e STAFF_PASS=secret koha.js
+k6 run -e STAFF_URL=http://staff.mylibrary.org -e STAFF_USER=admin -e STAFF_PASS=secret benchmarks/koha.js
 ```

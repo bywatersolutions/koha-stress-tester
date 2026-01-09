@@ -2,8 +2,9 @@ import http from "k6/http";
 import { check, sleep } from "k6";
 import { SharedArray } from "k6/data";
 import { Trend, Counter } from "k6/metrics";
-import encoding from "k6/encoding";
 import exec from "k6/execution";
+import * as reporting from "./lib/reporting.js";
+import * as solr from "./lib/solr.js";
 
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
@@ -34,20 +35,12 @@ const solrQTimeOver100 = new Counter("solr_qtime_over_100ms");
 const solrQTimeOver500 = new Counter("solr_qtime_over_500ms");
 const solrQTimeOver1000 = new Counter("solr_qtime_over_1000ms");
 
+// Storage for system info captured in teardown (shared with handleSummary)
+let __finalSolrSystemInfo = null;
 
-// Build auth header if credentials provided
-function getHeaders() {
-  const headers = {
-    "Accept": "application/json",
-  };
-  if (SOLR_USER && SOLR_PASS) {
-    const credentials = encoding.b64encode(`${SOLR_USER}:${SOLR_PASS}`);
-    headers["Authorization"] = `Basic ${credentials}`;
-  }
-  return headers;
-}
 
-const headers = getHeaders();
+// Get auth headers using shared function
+const headers = solr.getSolrHeaders(SOLR_USER, SOLR_PASS);
 
 // Default request params
 const params = {
@@ -148,7 +141,7 @@ export function setup() {
   }
   
   // Initial stats snapshot
-  collectSolrMetrics("BASELINE");
+  solr.collectSolrMetrics(SOLR_URL, SOLR_CORE, headers, "BASELINE");
 }
 
 // Main load test function
@@ -204,171 +197,36 @@ export function collectStats() {
   sleep(STATS_INTERVAL);
   
   const currentVUs = exec.scenario.activeVUs || "?";
-  collectSolrMetrics(`VUs: ~${currentVUs}`);
-}
-
-// Query Solr metrics endpoint
-function collectSolrMetrics(label) {
-  try {
-    // Get Solr core metrics
-    const metricsUrl = `${SOLR_URL}/solr/admin/metrics?group=core&type=all&prefix=QUERY,CACHE&wt=json`;
-    const metricsRes = http.get(metricsUrl, { headers, timeout: "5s", tags: { name: "stats" } });
-    
-    if (metricsRes.status === 200) {
-      const metrics = JSON.parse(metricsRes.body);
-      
-      console.log(`\n[SOLR STATS @ ${label}]`);
-      
-      // Try to extract useful metrics
-      const coreMetrics = metrics.metrics || {};
-      for (const [coreName, coreData] of Object.entries(coreMetrics)) {
-        if (coreName.includes(SOLR_CORE)) {
-          // Query handler stats
-          const queryHandler = coreData["QUERY./select"] || {};
-          if (queryHandler.requests !== undefined) {
-            console.log(`  Requests: ${queryHandler.requests}`);
-            console.log(`  Avg Time: ${queryHandler.avgTimePerRequest?.toFixed(2) || "N/A"}ms`);
-            console.log(`  95th %ile: ${queryHandler["95thPcRequestTime"]?.toFixed(2) || "N/A"}ms`);
-            console.log(`  Errors: ${queryHandler.errors || 0}`);
-            console.log(`  Timeouts: ${queryHandler.timeouts || 0}`);
-          }
-          
-          // Cache stats
-          const filterCache = coreData["CACHE.searcher.filterCache"] || {};
-          const queryCache = coreData["CACHE.searcher.queryResultCache"] || {};
-          
-          if (filterCache.hitratio !== undefined) {
-            console.log(`  Filter Cache Hit Ratio: ${(filterCache.hitratio * 100).toFixed(1)}%`);
-          }
-          if (queryCache.hitratio !== undefined) {
-            console.log(`  Query Cache Hit Ratio: ${(queryCache.hitratio * 100).toFixed(1)}%`);
-          }
-        }
-      }
-    }
-    
-    // Also get cluster status for shard info (once at start)
-    if (label === "BASELINE") {
-      const clusterUrl = `${SOLR_URL}/solr/admin/collections?action=CLUSTERSTATUS&wt=json`;
-      const clusterRes = http.get(clusterUrl, { headers, timeout: "5s", tags: { name: "stats" } });
-      
-      if (clusterRes.status === 200) {
-        const cluster = JSON.parse(clusterRes.body);
-        const collection = cluster.cluster?.collections?.[SOLR_CORE];
-        if (collection) {
-          const shardCount = Object.keys(collection.shards || {}).length;
-          const replicaCount = Object.values(collection.shards || {}).reduce((sum, shard) => {
-            return sum + Object.keys(shard.replicas || {}).length;
-          }, 0);
-          console.log(`  Collection: ${SOLR_CORE}`);
-          console.log(`  Shards: ${shardCount}`);
-          console.log(`  Total Replicas: ${replicaCount}`);
-          if (shardCount === 1) {
-            console.log(`  ###############################################################`);
-            console.log(`  ### WARNING: Single shard - no query parallelism across nodes! ###`);
-            console.log(`  ###############################################################`);
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.log(`[SOLR STATS @ ${label}] Error collecting metrics: ${e.message}`);
-  }
+  solr.collectSolrMetrics(SOLR_URL, SOLR_CORE, headers, `VUs: ~${currentVUs}`);
 }
 
 export function teardown() {
   console.log(`\n========================================`);
   console.log(`TEST COMPLETE`);
   console.log(`========================================`);
-  collectSolrMetrics("FINAL");
-}
-
-// Simple summary formatter (no external dependencies)
-function formatSummary(data) {
-  const lines = [
-    "",
-    "=".repeat(60),
-    "TEST SUMMARY",
-    "=".repeat(60),
-  ];
-
-  const m = data.metrics;
+  solr.collectSolrMetrics(SOLR_URL, SOLR_CORE, headers, "FINAL");
   
-  // Result overview
-  if (m.vus) lines.push(`  peak_vus................: ${m.vus.values.max}`);
-  if (m.http_reqs) lines.push(`  http_reqs...............: ${m.http_reqs.values.count}`);
-  if (m.iterations) lines.push(`  iterations..............: ${m.iterations.values.count}`);
-  if (m.http_req_failed) lines.push(`  http_req_failed.........: ${(m.http_req_failed.values.rate * 100).toFixed(2)}%`);
-  
-  lines.push("");
-  
-  // Timing (using median - resistant to timeout skew)
-  if (m.http_req_duration) {
-    const d = m.http_req_duration.values;
-    lines.push(`  http_req_duration.......: med=${d.med?.toFixed(2)}ms p(90)=${d["p(90)"]?.toFixed(2)}ms p(95)=${d["p(95)"]?.toFixed(2)}ms`);
+  // Capture system info NOW while there may still be load
+  console.log(`Capturing Solr system info...`);
+  __finalSolrSystemInfo = solr.fetchSolrSystemInfo(SOLR_URL, headers);
+  if (__finalSolrSystemInfo) {
+    console.log(`  Load average: ${__finalSolrSystemInfo.system?.systemLoadAverage}`);
+    console.log(`  Memory used: ${__finalSolrSystemInfo.jvm?.memory?.used}`);
   }
-  if (m.http_req_waiting) {
-    lines.push(`  http_req_waiting (TTFB).: med=${m.http_req_waiting.values.med?.toFixed(2)}ms`);
-  }
-  if (m.solr_qtime) {
-    const q = m.solr_qtime.values;
-    lines.push(`  solr_qtime..............: med=${q.med?.toFixed(2)}ms p(95)=${q["p(95)"]?.toFixed(2)}ms`);
-  }
-  
-  lines.push("");
-  
-  // Data transfer
-  if (m.data_received) {
-    const mb = (m.data_received.values.count / 1024 / 1024).toFixed(2);
-    lines.push(`  data_received...........: ${mb} MB`);
-  }
-
-  lines.push("=".repeat(60));
-  lines.push("");
-  return lines.join("\n");
-}
-
-// Fetch Solr system info (used in handleSummary)
-function fetchSolrSystemInfo() {
-  try {
-    const sysInfoUrl = `${SOLR_URL}/solr/admin/info/system?wt=json`;
-    const res = http.get(sysInfoUrl, { headers, timeout: "10s" });
-    if (res.status === 200) {
-      return JSON.parse(res.body);
-    }
-  } catch (e) {
-    return { error: `Could not fetch: ${e.message}` };
-  }
-  return null;
 }
 
 // Handle summary - export results to JSON file (runs even on threshold abort)
 export function handleSummary(data) {
   const m = data.metrics;
+  const abortReason = reporting.getAbortReason(data);
+  const { totalRequests, testDuration, rps } = reporting.calculateDerivedMetrics(data);
   
-  // Fetch Solr system info at end of test
-  const solrSystemInfo = fetchSolrSystemInfo();
-  
-  // Determine abort reason from thresholds
-  let abortReason = null;
-  if (data.thresholds) {
-    for (const [name, threshold] of Object.entries(data.thresholds)) {
-      if (!threshold.ok) {
-        abortReason = `${name} threshold crossed`;
-        break;
-      }
-    }
-  }
-
-  // Calculate derived metrics
-  const totalRequests = m.http_reqs?.values?.count || 0;
-  const testDuration = m.iteration_duration?.values?.count > 0 
-    ? (data.state?.testRunDurationMs || 0) / 1000 
-    : 0;
-  const rps = testDuration > 0 ? (totalRequests / testDuration).toFixed(2) : null;
+  // Use system info captured in teardown (while under load), fallback to fetching now
+  const solrSystemInfo = __finalSolrSystemInfo || solr.fetchSolrSystemInfo(SOLR_URL, headers);
 
   // Build clean, focused summary
   const summary = {
+    // ==================== TEST SETTINGS ====================
     metadata: {
       testScript: "solr_http.js",
       testNumber: TEST_NUMBER,
@@ -392,7 +250,7 @@ export function handleSummary(data) {
       httpReqDuration: "p(95)<5000ms",
       solrQtime: "p(95)<2000ms",
     },
-    solrSystem: solrSystemInfo,
+    // ==================== TEST RESULTS ====================
     result: {
       peakVUs: m.vus?.values?.max || 0,
       configuredMaxVUs: MAX_VUS,
@@ -403,29 +261,10 @@ export function handleSummary(data) {
       failureRate: `${((m.http_req_failed?.values?.rate || 0) * 100).toFixed(2)}%`,
       abortReason: abortReason,
     },
-    timing: {
-      // Median/percentiles are preferred - resistant to timeout skew
-      med_ms: m.http_req_duration?.values?.med?.toFixed(2) || null,
-      p90_ms: m.http_req_duration?.values?.["p(90)"]?.toFixed(2) || null,
-      p95_ms: m.http_req_duration?.values?.["p(95)"]?.toFixed(2) || null,
-      min_ms: m.http_req_duration?.values?.min?.toFixed(2) || null,
-      max_ms: m.http_req_duration?.values?.max?.toFixed(2) || null,
-      // Average included but may be skewed by timeouts
-      avg_ms_may_be_skewed: m.http_req_duration?.values?.avg?.toFixed(2) || null,
-    },
-    timingBreakdown: {
-      blocked_med_ms: m.http_req_blocked?.values?.med?.toFixed(2) || null,
-      connecting_med_ms: m.http_req_connecting?.values?.med?.toFixed(2) || null,
-      tls_handshake_med_ms: m.http_req_tls_handshaking?.values?.med?.toFixed(2) || null,
-      sending_med_ms: m.http_req_sending?.values?.med?.toFixed(2) || null,
-      waiting_med_ms: m.http_req_waiting?.values?.med?.toFixed(2) || null,
-      receiving_med_ms: m.http_req_receiving?.values?.med?.toFixed(2) || null,
-    },
-    dataTransfer: {
-      received_mb: ((m.data_received?.values?.count || 0) / 1024 / 1024).toFixed(2),
-      sent_mb: ((m.data_sent?.values?.count || 0) / 1024 / 1024).toFixed(2),
-    },
-    solr: {
+    timing: reporting.buildTimingSection(m),
+    timingBreakdown: reporting.buildTimingBreakdown(m),
+    dataTransfer: reporting.buildDataTransfer(m),
+    solrMetrics: {
       qtime_med_ms: m.solr_qtime?.values?.med?.toFixed(2) || null,
       qtime_p95_ms: m.solr_qtime?.values?.["p(95)"]?.toFixed(2) || null,
       qtime_max_ms: m.solr_qtime?.values?.max?.toFixed(2) || null,
@@ -434,29 +273,13 @@ export function handleSummary(data) {
       slow_queries_over_1000ms: m.solr_qtime_over_1000ms?.values?.count || 0,
       avg_results_found: m.solr_num_found?.values?.avg?.toFixed(0) || null,
     },
-    checks: {},
+    checks: reporting.extractChecks(data),
+    // ==================== SYSTEM INFORMATION ====================
+    solrSystem: solrSystemInfo,
   };
 
-  // Extract check pass rates
-  if (data.root_group?.checks) {
-    for (const check of data.root_group.checks) {
-      const total = check.passes + check.fails;
-      summary.checks[check.name] = {
-        passes: check.passes,
-        fails: check.fails,
-        rate: total > 0 ? `${((check.passes / total) * 100).toFixed(1)}%` : "N/A",
-      };
-    }
-  }
-
-  // Generate filename: script-testnumber-shortdate-time.json
-  const now = new Date();
-  const shortDate = now.toISOString().slice(0, 10).replace(/-/g, "");
-  const time = now.toISOString().slice(11, 16).replace(/:/g, "");
-  const outputPath = OUTPUT_FILE || `/output/solr-${TEST_NUMBER}-${shortDate}-${time}.json`;
-
-  // Add filename to console output
-  const consoleOutput = formatSummary(data) + `  Output: ${outputPath}\n`;
+  const outputPath = OUTPUT_FILE || reporting.generateOutputPath("solr", TEST_NUMBER);
+  const consoleOutput = reporting.formatSummary(data, { includeSolrQtime: true }) + `  Output: ${outputPath}\n`;
 
   return {
     stdout: consoleOutput,

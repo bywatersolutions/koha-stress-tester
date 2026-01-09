@@ -2,6 +2,8 @@ import http from "k6/http";
 import { sleep, check } from "k6";
 import { parseHTML } from "k6/html";
 import { SharedArray } from "k6/data";
+import * as reporting from "./lib/reporting.js";
+import * as solr from "./lib/solr.js";
 
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
@@ -15,6 +17,15 @@ const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001"; // Test number for output filename
+
+// Solr configuration (optional - for capturing backend system info)
+const SOLR_URL = __ENV.SOLR_URL || "";
+const SOLR_USER = __ENV.SOLR_USER || "";
+const SOLR_PASS = __ENV.SOLR_PASS || "";
+const solrHeaders = SOLR_URL ? solr.getSolrHeaders(SOLR_USER, SOLR_PASS) : null;
+
+// Storage for system info captured in teardown
+let __finalSolrSystemInfo = null;
 
 // Load words from file
 const words = new SharedArray("words", function () {
@@ -74,7 +85,21 @@ export function setup() {
   console.log(`Aborts when failure rate exceeds 5%`);
 }
 
-export function teardown(data) {}
+export function teardown(data) {
+  console.log(`\n========================================`);
+  console.log(`TEST COMPLETE`);
+  console.log(`========================================`);
+  
+  // Capture Solr system info if configured
+  if (SOLR_URL) {
+    console.log(`Capturing Solr system info...`);
+    __finalSolrSystemInfo = solr.fetchSolrSystemInfo(SOLR_URL, solrHeaders);
+    if (__finalSolrSystemInfo && !__finalSolrSystemInfo.error) {
+      console.log(`  Load average: ${__finalSolrSystemInfo.system?.systemLoadAverage}`);
+      console.log(`  Memory used: ${__finalSolrSystemInfo.jvm?.memory?.used}`);
+    }
+  }
+}
 
 /**
  * Main test function that runs for each VU (Virtual User)
@@ -131,80 +156,20 @@ export default function () {
   }
 }
 
-/**
- * Randomly selects an element from an array
- * @param {Array} arr - The array to pick an element from
- * @returns {*} A random element from the input array
- */
-function rando(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-// Simple summary formatter (no external dependencies)
-function formatSummary(data) {
-  const lines = [
-    "",
-    "=".repeat(60),
-    "TEST SUMMARY",
-    "=".repeat(60),
-  ];
-
-  const m = data.metrics;
-  
-  // Result overview
-  if (m.vus) lines.push(`  peak_vus................: ${m.vus.values.max}`);
-  if (m.http_reqs) lines.push(`  http_reqs...............: ${m.http_reqs.values.count}`);
-  if (m.iterations) lines.push(`  iterations..............: ${m.iterations.values.count}`);
-  if (m.http_req_failed) lines.push(`  http_req_failed.........: ${(m.http_req_failed.values.rate * 100).toFixed(2)}%`);
-  
-  lines.push("");
-  
-  // Timing (using median - resistant to timeout skew)
-  if (m.http_req_duration) {
-    const d = m.http_req_duration.values;
-    lines.push(`  http_req_duration.......: med=${d.med?.toFixed(2)}ms p(90)=${d["p(90)"]?.toFixed(2)}ms p(95)=${d["p(95)"]?.toFixed(2)}ms`);
-  }
-  if (m.http_req_waiting) {
-    lines.push(`  http_req_waiting (TTFB).: med=${m.http_req_waiting.values.med?.toFixed(2)}ms`);
-  }
-  
-  lines.push("");
-  
-  // Data transfer
-  if (m.data_received) {
-    const mb = (m.data_received.values.count / 1024 / 1024).toFixed(2);
-    lines.push(`  data_received...........: ${mb} MB`);
-  }
-
-  lines.push("=".repeat(60));
-  lines.push("");
-  return lines.join("\n");
-}
-
 // Handle summary - export results to JSON file (runs even on threshold abort)
 export function handleSummary(data) {
   const m = data.metrics;
+  const abortReason = reporting.getAbortReason(data);
+  const { totalRequests, testDuration, rps } = reporting.calculateDerivedMetrics(data);
   
-  // Determine abort reason from thresholds
-  let abortReason = null;
-  if (data.thresholds) {
-    for (const [name, threshold] of Object.entries(data.thresholds)) {
-      if (!threshold.ok) {
-        abortReason = `${name} threshold crossed`;
-        break;
-      }
-    }
-  }
-
-  // Calculate derived metrics
-  const totalRequests = m.http_reqs?.values?.count || 0;
-  const testDuration = m.iteration_duration?.values?.count > 0 
-    ? (data.state?.testRunDurationMs || 0) / 1000 
-    : 0;
-  const rps = testDuration > 0 ? (totalRequests / testDuration).toFixed(2) : null;
+  // Use system info captured in teardown, or fetch now if not available
+  const solrSystemInfo = SOLR_URL 
+    ? (__finalSolrSystemInfo || solr.fetchSolrSystemInfo(SOLR_URL, solrHeaders))
+    : null;
 
   // Build clean, focused summary
   const summary = {
+    // ==================== TEST SETTINGS ====================
     metadata: {
       testScript: "aspen_http.js",
       testNumber: TEST_NUMBER,
@@ -219,11 +184,13 @@ export function handleSummary(data) {
       rampTime: RAMP_TIME,
       holdTime: HOLD_TIME,
       requestTimeout: "6s",
+      solrUrl: SOLR_URL || "(not configured)",
     },
     thresholds: {
       httpReqFailed: "rate<0.05 (5%)",
       httpReqDuration: "p(95)<10000ms",
     },
+    // ==================== TEST RESULTS ====================
     result: {
       peakVUs: m.vus?.values?.max || 0,
       configuredMaxVUs: MAX_VUS,
@@ -234,51 +201,16 @@ export function handleSummary(data) {
       failureRate: `${((m.http_req_failed?.values?.rate || 0) * 100).toFixed(2)}%`,
       abortReason: abortReason,
     },
-    timing: {
-      // Median/percentiles are preferred - resistant to timeout skew
-      med_ms: m.http_req_duration?.values?.med?.toFixed(2) || null,
-      p90_ms: m.http_req_duration?.values?.["p(90)"]?.toFixed(2) || null,
-      p95_ms: m.http_req_duration?.values?.["p(95)"]?.toFixed(2) || null,
-      min_ms: m.http_req_duration?.values?.min?.toFixed(2) || null,
-      max_ms: m.http_req_duration?.values?.max?.toFixed(2) || null,
-      // Average included but may be skewed by timeouts
-      avg_ms_may_be_skewed: m.http_req_duration?.values?.avg?.toFixed(2) || null,
-    },
-    timingBreakdown: {
-      blocked_med_ms: m.http_req_blocked?.values?.med?.toFixed(2) || null,
-      connecting_med_ms: m.http_req_connecting?.values?.med?.toFixed(2) || null,
-      tls_handshake_med_ms: m.http_req_tls_handshaking?.values?.med?.toFixed(2) || null,
-      sending_med_ms: m.http_req_sending?.values?.med?.toFixed(2) || null,
-      waiting_med_ms: m.http_req_waiting?.values?.med?.toFixed(2) || null,
-      receiving_med_ms: m.http_req_receiving?.values?.med?.toFixed(2) || null,
-    },
-    dataTransfer: {
-      received_mb: ((m.data_received?.values?.count || 0) / 1024 / 1024).toFixed(2),
-      sent_mb: ((m.data_sent?.values?.count || 0) / 1024 / 1024).toFixed(2),
-    },
-    checks: {},
+    timing: reporting.buildTimingSection(m),
+    timingBreakdown: reporting.buildTimingBreakdown(m),
+    dataTransfer: reporting.buildDataTransfer(m),
+    checks: reporting.extractChecks(data),
+    // ==================== SYSTEM INFORMATION ====================
+    solrSystem: solrSystemInfo,
   };
 
-  // Extract check pass rates
-  if (data.root_group?.checks) {
-    for (const check of data.root_group.checks) {
-      const total = check.passes + check.fails;
-      summary.checks[check.name] = {
-        passes: check.passes,
-        fails: check.fails,
-        rate: total > 0 ? `${((check.passes / total) * 100).toFixed(1)}%` : "N/A",
-      };
-    }
-  }
-
-  // Generate filename: script-testnumber-shortdate-time.json
-  const now = new Date();
-  const shortDate = now.toISOString().slice(0, 10).replace(/-/g, "");
-  const time = now.toISOString().slice(11, 16).replace(/:/g, "");
-  const outputPath = OUTPUT_FILE || `/output/aspen-${TEST_NUMBER}-${shortDate}-${time}.json`;
-
-  // Add filename to console output
-  const consoleOutput = formatSummary(data) + `  Output: ${outputPath}\n`;
+  const outputPath = OUTPUT_FILE || reporting.generateOutputPath("aspen", TEST_NUMBER);
+  const consoleOutput = reporting.formatSummary(data) + `  Output: ${outputPath}\n`;
 
   return {
     stdout: consoleOutput,
