@@ -402,11 +402,16 @@ export function handleSummary(data) {
   }
 
   // Generate timestamped filename if not specified
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const outputPath = OUTPUT_FILE || `/output/solr-${timestamp}.json`;
+  const now = new Date();
+  const date = now.toISOString().slice(0, 10);
+  const time = now.toISOString().slice(11, 19).replace(/:/g, "-");
+  const outputPath = OUTPUT_FILE || `/output/solr-${date}-${time}.json`;
+
+  // Add filename to console output
+  const consoleOutput = formatSummary(data) + `  Output: ${outputPath}\n`;
 
   return {
-    stdout: formatSummary(data),
+    stdout: consoleOutput,
     [outputPath]: JSON.stringify(summary, null, 2),
   };
 }
