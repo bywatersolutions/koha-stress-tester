@@ -276,18 +276,35 @@ function formatSummary(data) {
   ];
 
   const m = data.metrics;
+  
+  // Result overview
+  if (m.vus) lines.push(`  peak_vus................: ${m.vus.values.max}`);
   if (m.http_reqs) lines.push(`  http_reqs...............: ${m.http_reqs.values.count}`);
+  if (m.iterations) lines.push(`  iterations..............: ${m.iterations.values.count}`);
+  if (m.http_req_failed) lines.push(`  http_req_failed.........: ${(m.http_req_failed.values.rate * 100).toFixed(2)}%`);
+  
+  lines.push("");
+  
+  // Timing (using median - resistant to timeout skew)
   if (m.http_req_duration) {
     const d = m.http_req_duration.values;
-    lines.push(`  http_req_duration.......: avg=${d.avg?.toFixed(2)}ms p(95)=${d["p(95)"]?.toFixed(2)}ms max=${d.max?.toFixed(2)}ms`);
+    lines.push(`  http_req_duration.......: med=${d.med?.toFixed(2)}ms p(90)=${d["p(90)"]?.toFixed(2)}ms p(95)=${d["p(95)"]?.toFixed(2)}ms`);
   }
-  if (m.http_req_failed) lines.push(`  http_req_failed.........: ${(m.http_req_failed.values.rate * 100).toFixed(2)}%`);
+  if (m.http_req_waiting) {
+    lines.push(`  http_req_waiting (TTFB).: med=${m.http_req_waiting.values.med?.toFixed(2)}ms`);
+  }
   if (m.solr_qtime) {
     const q = m.solr_qtime.values;
-    lines.push(`  solr_qtime..............: avg=${q.avg?.toFixed(2)}ms p(95)=${q["p(95)"]?.toFixed(2)}ms`);
+    lines.push(`  solr_qtime..............: med=${q.med?.toFixed(2)}ms p(95)=${q["p(95)"]?.toFixed(2)}ms`);
   }
-  if (m.iterations) lines.push(`  iterations..............: ${m.iterations.values.count}`);
-  if (m.vus) lines.push(`  peak_vus................: ${m.vus.values.max}`);
+  
+  lines.push("");
+  
+  // Data transfer
+  if (m.data_received) {
+    const mb = (m.data_received.values.count / 1024 / 1024).toFixed(2);
+    lines.push(`  data_received...........: ${mb} MB`);
+  }
 
   lines.push("=".repeat(60));
   lines.push("");
@@ -309,6 +326,13 @@ export function handleSummary(data) {
     }
   }
 
+  // Calculate derived metrics
+  const totalRequests = m.http_reqs?.values?.count || 0;
+  const testDuration = m.iteration_duration?.values?.count > 0 
+    ? (data.state?.testRunDurationMs || 0) / 1000 
+    : 0;
+  const rps = testDuration > 0 ? (totalRequests / testDuration).toFixed(2) : null;
+
   // Build clean, focused summary
   const summary = {
     metadata: {
@@ -324,20 +348,37 @@ export function handleSummary(data) {
     result: {
       peakVUs: m.vus?.values?.max || 0,
       configuredMaxVUs: MAX_VUS,
-      totalRequests: m.http_reqs?.values?.count || 0,
+      testDuration_s: testDuration.toFixed(2),
+      requestsPerSecond: rps,
+      totalRequests: totalRequests,
       totalIterations: m.iterations?.values?.count || 0,
       failureRate: `${((m.http_req_failed?.values?.rate || 0) * 100).toFixed(2)}%`,
       abortReason: abortReason,
     },
     timing: {
-      avg_ms: m.http_req_duration?.values?.avg?.toFixed(2) || null,
+      // Median/percentiles are preferred - resistant to timeout skew
       med_ms: m.http_req_duration?.values?.med?.toFixed(2) || null,
       p90_ms: m.http_req_duration?.values?.["p(90)"]?.toFixed(2) || null,
       p95_ms: m.http_req_duration?.values?.["p(95)"]?.toFixed(2) || null,
+      min_ms: m.http_req_duration?.values?.min?.toFixed(2) || null,
       max_ms: m.http_req_duration?.values?.max?.toFixed(2) || null,
+      // Average included but may be skewed by timeouts
+      avg_ms_may_be_skewed: m.http_req_duration?.values?.avg?.toFixed(2) || null,
+    },
+    timingBreakdown: {
+      blocked_med_ms: m.http_req_blocked?.values?.med?.toFixed(2) || null,
+      connecting_med_ms: m.http_req_connecting?.values?.med?.toFixed(2) || null,
+      tls_handshake_med_ms: m.http_req_tls_handshaking?.values?.med?.toFixed(2) || null,
+      sending_med_ms: m.http_req_sending?.values?.med?.toFixed(2) || null,
+      waiting_med_ms: m.http_req_waiting?.values?.med?.toFixed(2) || null,
+      receiving_med_ms: m.http_req_receiving?.values?.med?.toFixed(2) || null,
+    },
+    dataTransfer: {
+      received_mb: ((m.data_received?.values?.count || 0) / 1024 / 1024).toFixed(2),
+      sent_mb: ((m.data_sent?.values?.count || 0) / 1024 / 1024).toFixed(2),
     },
     solr: {
-      qtime_avg_ms: m.solr_qtime?.values?.avg?.toFixed(2) || null,
+      qtime_med_ms: m.solr_qtime?.values?.med?.toFixed(2) || null,
       qtime_p95_ms: m.solr_qtime?.values?.["p(95)"]?.toFixed(2) || null,
       qtime_max_ms: m.solr_qtime?.values?.max?.toFixed(2) || null,
       slow_queries_over_100ms: m.solr_qtime_over_100ms?.values?.count || 0,
