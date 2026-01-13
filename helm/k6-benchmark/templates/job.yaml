@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  backoffLimit: {{ .Values.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["k6", "run", "/scripts/script.js"]
+          env:
+            - name: SOLR_URL
+              value: "{{ .Values.solr.url }}"
+            - name: SOLR_CORE
+              value: "{{ .Values.solr.core }}"
+            - name: SOLR_USER
+              value: "{{ .Values.solr.user }}"
+            - name: SOLR_PASS
+              value: "{{ .Values.solr.pass }}"
+            - name: MAX_VUS
+              value: "{{ .Values.test.maxVUs }}"
+            - name: VU_STEP
+              value: "{{ .Values.test.vuStep }}"
+            - name: RAMP_TIME
+              value: "{{ .Values.test.rampTime }}"
+            - name: HOLD_TIME
+              value: "{{ .Values.test.holdTime }}"
+            - name: TIMEOUT
+              value: "{{ .Values.test.timeout }}"
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: script
+              mountPath: /scripts/script.js
+              subPath: script.js
+            - name: words
+              mountPath: /scripts/words.txt
+              subPath: words.txt
+      volumes:
+        - name: script
+          configMap:
+            name: {{ .Release.Name }}-script
+        - name: words
+          configMap:
+            name: {{ .Release.Name }}-words
+

@@ -51,6 +51,12 @@ MAX_VUS=300
 VU_STEP=10
 RAMP_TIME=5s
 HOLD_TIME=5s
+# Abort test when p(THRESHOLD_PERCENTILE) response time exceeds threshold
+# Lower percentile = more tolerant of slow outliers (e.g., 90 = allow 10% slow)
+# Higher percentile = stricter (e.g., 99 = only allow 1% slow)
+THRESHOLD_PERCENTILE=98
+ASPEN_THRESHOLD_MS=6000
+SOLR_THRESHOLD_MS=2000
 STATS_INTERVAL=10
 HARD_TIMEOUT=30m
 HOLD_ON_FAIL=30s

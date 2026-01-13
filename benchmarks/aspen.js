@@ -31,7 +31,7 @@ export const options = {
 // ------------------------------------------------------------
 const BASE_URL = __ENV.BASE_URL || "https://localhost";
 const HOST_HEADER = __ENV.HOST_HEADER || "aspen-discovery.localhost";
-const RESULTS_TO_CLICK = __ENV.RESULTS_TO_CLICK || 5;
+const RESULTS_TO_CLICK = parseInt(__ENV.RESULTS_TO_CLICK) || 5;
 
 // Read all words from the file
 const words = open("./words_alpha.txt").split("\r\n");
@@ -53,6 +53,9 @@ export default async function (data) {
   await page.setExtraHTTPHeaders({ Host: HOST_HEADER });
   await page.goto(BASE_URL);
 
+  // Simulate user think time before typing
+  await sleep(Math.random() * 3);
+
   // Type into search box
   const lookforInput = page.locator("#lookfor");
   await lookforInput.type(searchTerm);
@@ -65,6 +68,9 @@ export default async function (data) {
     page.waitForNavigation(),
     searchButton.click({ force: true }),
   ]);
+
+  // Simulate user scanning results (longer think time)
+  await sleep(Math.random() * 10);
 
   // Find results
   const locator = await page.locator(".result-title");
@@ -89,7 +95,13 @@ export default async function (data) {
       // Wait for page to load
       await page.waitForSelector("#main-content");
 
+      // Simulate user reading the record
+      await sleep(Math.random() * 10);
+
       await page.locator("#returnToSearch a").click();
+
+      // Brief pause before next click
+      await sleep(Math.random() * 3);
     }
   } else {
     console.log("No elements to click.");

@@ -3,6 +3,7 @@
  * @param {Object} data - k6 summary data
  * @param {Object} options - Options for formatting
  * @param {boolean} options.includeSolrQtime - Include Solr QTime metrics
+ * @param {number} options.peakVUs - Manually tracked peak VUs (more accurate during abort)
  * @returns {string} Formatted summary string
  */
 export function formatSummary(data, options = {}) {
@@ -10,8 +11,9 @@ export function formatSummary(data, options = {}) {
 
   const m = data.metrics;
 
-  // Result overview
-  if (m.vus) lines.push(`  peak_vus................: ${m.vus.values.max}`);
+  // Result overview - prefer manually tracked peak VUs over k6 metric
+  const peakVUs = options.peakVUs || m.vus?.values?.max;
+  if (peakVUs) lines.push(`  peak_vus................: ${peakVUs}`);
   if (m.http_reqs)
     lines.push(`  http_reqs...............: ${m.http_reqs.values.count}`);
   if (m.iterations)

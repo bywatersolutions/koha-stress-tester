@@ -17,6 +17,8 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
+const THRESHOLD_MS = parseInt(__ENV.SOLR_THRESHOLD_MS) || 2000; // Response time threshold in ms
+const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98; // Percentile to check (e.g., 98 = p(98))
 const STATS_INTERVAL = parseInt(__ENV.STATS_INTERVAL) || 10; // seconds between stats collection
 const HARD_TIMEOUT = __ENV.HARD_TIMEOUT || "30m"; // Hard timeout - ends test regardless of state
 const HOLD_ON_FAIL = __ENV.HOLD_ON_FAIL || "30s"; // Time to collect stats after threshold crossed
@@ -38,6 +40,9 @@ const solrQTimeOver1000 = new Counter("solr_qtime_over_1000ms");
 
 // Storage for system info captured in teardown (shared with handleSummary)
 let __finalSolrSystemInfo = null;
+
+// Track peak VUs during execution (before teardown/abort delays)
+let __peakVUs = 0;
 
 
 // Get auth headers using shared function
@@ -97,12 +102,12 @@ export const options = {
   thresholds: {
     http_req_duration: [
       {
-        threshold: "p(95)<2000",  // Abort when 95th percentile exceeds 2s
+        threshold: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}`,
         abortOnFail: true,
         delayAbortEval: HOLD_ON_FAIL,
       },
     ],
-    solr_qtime: ["p(95)<2000"],   // Solr's self-reported time
+    solr_qtime: [`p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}`],
   },
 };
 
@@ -115,10 +120,11 @@ export function setup() {
   console.log(`SOLR_USER: ${SOLR_USER ? "(set)" : "(not set)"}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
+  console.log(`THRESHOLD_MS: ${THRESHOLD_MS}`);
   console.log(`STATS_INTERVAL: ${STATS_INTERVAL}s`);
   console.log(`HARD_TIMEOUT: ${HARD_TIMEOUT} (absolute max duration)`);
   console.log(`HOLD_ON_FAIL: ${HOLD_ON_FAIL} (stats capture before abort)`);
-  console.log(`Aborts when p(95) response time exceeds 2s`);
+  console.log(`Aborts when p(${THRESHOLD_PERCENTILE}) response time exceeds ${THRESHOLD_MS}ms`);
   console.log(`========================================`);
   
   // Fetch and display key Solr system info
@@ -141,14 +147,20 @@ export function setup() {
 }
 
 // Main load test function
+// Each VU executes 1 query per second, so N VUs = N queries/second
 export default function () {
+  // Track peak VUs in real-time (before any abort/teardown delays)
+  const vus = exec.instance.vusActive;
+  if (vus > __peakVUs) {
+    __peakVUs = vus;
+  }
+
   const word = words[Math.floor(Math.random() * words.length)];
   
   // Solr select query with debug timing
   const queryUrl = `${SOLR_URL}/solr/${SOLR_CORE}/select?q=${encodeURIComponent(word)}&wt=json&rows=10`;
   
   const res = http.get(queryUrl, params);
-  const vus = exec.instance.vusActive;
   const duration = res.timings.duration;
   
   // Log failures with context
@@ -197,6 +209,9 @@ export default function () {
     "response < 1000ms": (r) => r.timings.duration < 1000,
     "response < 2000ms": (r) => r.timings.duration < 2000,
   });
+
+  // Fixed 1-second pacing: N VUs = N queries/second
+  sleep(1);
 }
 
 // Stats collector function - runs independently
@@ -253,12 +268,12 @@ export function handleSummary(data) {
       requestTimeout: "6s",
     },
     thresholds: {
-      httpReqDuration: "p(95)<2000ms",
-      solrQtime: "p(95)<2000ms",
+      httpReqDuration: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}ms`,
+      solrQtime: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}ms`,
     },
     // ==================== TEST RESULTS ====================
     result: {
-      peakVUs: m.vus?.values?.max || 0,
+      peakVUs: __peakVUs || m.vus?.values?.max || 0,
       configuredMaxVUs: MAX_VUS,
       testDuration_s: testDuration.toFixed(2),
       requestsPerSecond: rps,
@@ -285,7 +300,7 @@ export function handleSummary(data) {
   };
 
   const outputPath = OUTPUT_FILE || reporting.generateOutputPath("solr", TEST_NUMBER);
-  const consoleOutput = reporting.formatSummary(data, { includeSolrQtime: true }) + `  Output: ${outputPath}\n`;
+  const consoleOutput = reporting.formatSummary(data, { includeSolrQtime: true, peakVUs: __peakVUs }) + `  Output: ${outputPath}\n`;
 
   return {
     stdout: consoleOutput,

@@ -1,0 +1,51 @@
+# K6 Benchmark Helm Chart Values
+
+# Image settings
+image:
+  repository: grafana/k6
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Solr connection settings
+solr:
+  # Internal service URL (use FQDN for cross-namespace access)
+  url: "http://clevnet-solrcloud-solrcloud-common.solr-cloud.svc.cluster.local"
+  core: "grouped_works_v2"
+  # Leave empty if no auth required inside cluster
+  user: ""
+  pass: ""
+
+# Test configuration
+test:
+  # Staged load test parameters
+  maxVUs: 300
+  vuStep: 10
+  rampTime: "5s"
+  holdTime: "5s"
+
+  # Request timeout
+  timeout: "30s"
+
+  # Stats collection interval (seconds)
+  statsInterval: 10
+
+# Word list for random search terms
+# Will be mounted as /scripts/words.txt
+wordlistFile: "words_sample.txt"
+
+# Resource limits for k6 pod
+resources:
+  limits:
+    cpu: "2"
+    memory: "2Gi"
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+
+# Namespace to deploy into
+namespace: k6-tests
+
+# Job settings
+backoffLimit: 0
+ttlSecondsAfterFinished: 300  # Cleanup job 5 minutes after completion
+

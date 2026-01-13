@@ -2,6 +2,7 @@ import http from "k6/http";
 import { sleep, check } from "k6";
 import { parseHTML } from "k6/html";
 import { SharedArray } from "k6/data";
+import exec from "k6/execution";
 import * as reporting from "./lib/reporting.js";
 import * as solr from "./lib/solr.js";
 
@@ -10,11 +11,13 @@ import * as solr from "./lib/solr.js";
 // ------------------------------------------------------------
 const BASE_URL = __ENV.BASE_URL || "https://localhost";
 const HOST_HEADER = __ENV.HOST_HEADER || "aspen-discovery.localhost";
-const RESULTS_TO_CLICK = __ENV.RESULTS_TO_CLICK || 5;
+const RESULTS_TO_CLICK = parseInt(__ENV.RESULTS_TO_CLICK) || 5;
 const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
+const THRESHOLD_MS = parseInt(__ENV.ASPEN_THRESHOLD_MS) || 6000; // Response time threshold in ms
+const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98; // Percentile to check (e.g., 98 = p(98))
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001"; // Test number for output filename
 
@@ -26,6 +29,9 @@ const solrHeaders = SOLR_URL ? solr.getSolrHeaders(SOLR_USER, SOLR_PASS) : null;
 
 // Storage for system info captured in teardown
 let __finalSolrSystemInfo = null;
+
+// Track peak VUs during execution (before teardown/abort delays)
+let __peakVUs = 0;
 
 // Load words from file
 const words = new SharedArray("words", function () {
@@ -44,7 +50,7 @@ const params = {
 
 // ------------------------------------------------------------
 // Generate stages dynamically: ramp by VU_STEP, hold, repeat until MAX_VUS
-// Aborts when p(95) response time exceeds 2s
+// Aborts when p(THRESHOLD_PERCENTILE) response time exceeds THRESHOLD_MS
 // ------------------------------------------------------------
 function generateStages() {
   const stages = [];
@@ -62,7 +68,7 @@ export const options = {
   thresholds: {
     http_req_duration: [
       {
-        threshold: "p(95)<2000",  // Abort when 95th percentile exceeds 2s
+        threshold: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}`,
         abortOnFail: true,
         delayAbortEval: "30s",
       },
@@ -75,7 +81,8 @@ export function setup() {
   console.log(`HOST_HEADER: ${HOST_HEADER}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
-  console.log(`Aborts when p(95) response time exceeds 2s`);
+  console.log(`THRESHOLD_MS: ${THRESHOLD_MS}`);
+  console.log(`Aborts when p(${THRESHOLD_PERCENTILE}) response time exceeds ${THRESHOLD_MS}ms`);
 }
 
 export function teardown(data) {
@@ -98,6 +105,12 @@ export function teardown(data) {
  * Main test function that runs for each VU (Virtual User)
  */
 export default function () {
+  // Track peak VUs in real-time (before any abort/teardown delays)
+  const currentVUs = exec.instance.vusActive;
+  if (currentVUs > __peakVUs) {
+    __peakVUs = currentVUs;
+  }
+
   const searchTerm = words[Math.floor(Math.random() * words.length)];
 
   // Load homepage
@@ -106,7 +119,8 @@ export default function () {
     "homepage loaded": (r) => r.status === 200,
   });
 
-  sleep(0.5);
+  // Simulate user think time before typing search
+  sleep(Math.random() * 3);
 
   // Perform search
   const searchUrl = `${BASE_URL}/Union/Search?view=list&lookfor=${encodeURIComponent(searchTerm)}&searchIndex=Keyword&searchSource=local`;
@@ -117,6 +131,9 @@ export default function () {
     "response < 1000ms": (r) => r.timings.duration < 1000,
     "response < 2000ms": (r) => r.timings.duration < 2000,
   });
+
+  // Simulate user scanning results (longer think time)
+  sleep(Math.random() * 10);
 
   // Parse results and extract record links
   const doc = parseHTML(searchRes.body);
@@ -145,7 +162,11 @@ export default function () {
       "record loaded": (r) => r.status === 200,
     });
 
-    sleep(0.5);
+    // Simulate user reading the record
+    sleep(Math.random() * 10);
+
+    // Brief pause before next click
+    sleep(Math.random() * 3);
   }
 }
 
@@ -180,11 +201,11 @@ export function handleSummary(data) {
       solrUrl: SOLR_URL || "(not configured)",
     },
     thresholds: {
-      httpReqDuration: "p(95)<2000ms",
+      httpReqDuration: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}ms`,
     },
     // ==================== TEST RESULTS ====================
     result: {
-      peakVUs: m.vus?.values?.max || 0,
+      peakVUs: __peakVUs || m.vus?.values?.max || 0,
       configuredMaxVUs: MAX_VUS,
       testDuration_s: testDuration.toFixed(2),
       requestsPerSecond: rps,
@@ -202,7 +223,7 @@ export function handleSummary(data) {
   };
 
   const outputPath = OUTPUT_FILE || reporting.generateOutputPath("aspen", TEST_NUMBER);
-  const consoleOutput = reporting.formatSummary(data) + `  Output: ${outputPath}\n`;
+  const consoleOutput = reporting.formatSummary(data, { peakVUs: __peakVUs }) + `  Output: ${outputPath}\n`;
 
   return {
     stdout: consoleOutput,
