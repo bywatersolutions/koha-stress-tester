@@ -44,7 +44,7 @@ const params = {
 
 // ------------------------------------------------------------
 // Generate stages dynamically: ramp by VU_STEP, hold, repeat until MAX_VUS
-// Aborts when failure rate exceeds 5%
+// Aborts when p(95) response time exceeds 2s
 // ------------------------------------------------------------
 function generateStages() {
   const stages = [];
@@ -60,16 +60,9 @@ export const options = {
   insecureSkipTLSVerify: true,
   stages: generateStages(),
   thresholds: {
-    http_req_failed: [
-      {
-        threshold: "rate<0.05",
-        abortOnFail: true,
-        delayAbortEval: "30s",
-      },
-    ],
     http_req_duration: [
       {
-        threshold: "p(95)<10000",
+        threshold: "p(95)<2000",  // Abort when 95th percentile exceeds 2s
         abortOnFail: true,
         delayAbortEval: "30s",
       },
@@ -82,7 +75,7 @@ export function setup() {
   console.log(`HOST_HEADER: ${HOST_HEADER}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
-  console.log(`Aborts when failure rate exceeds 5%`);
+  console.log(`Aborts when p(95) response time exceeds 2s`);
 }
 
 export function teardown(data) {
@@ -187,8 +180,7 @@ export function handleSummary(data) {
       solrUrl: SOLR_URL || "(not configured)",
     },
     thresholds: {
-      httpReqFailed: "rate<0.05 (5%)",
-      httpReqDuration: "p(95)<10000ms",
+      httpReqDuration: "p(95)<2000ms",
     },
     // ==================== TEST RESULTS ====================
     result: {

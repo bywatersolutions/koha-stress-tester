@@ -35,6 +35,7 @@ const solrQTimeOver100 = new Counter("solr_qtime_over_100ms");
 const solrQTimeOver500 = new Counter("solr_qtime_over_500ms");
 const solrQTimeOver1000 = new Counter("solr_qtime_over_1000ms");
 
+
 // Storage for system info captured in teardown (shared with handleSummary)
 let __finalSolrSystemInfo = null;
 
@@ -45,7 +46,7 @@ const headers = solr.getSolrHeaders(SOLR_USER, SOLR_PASS);
 // Default request params
 const params = {
   headers: headers,
-  timeout: "6s",
+  timeout: "30s",  // Allow slow queries to complete so we can measure them
 };
 
 // ------------------------------------------------------------
@@ -73,8 +74,10 @@ function getTotalDuration() {
 export const options = {
   insecureSkipTLSVerify: true,
   
-  // Hard timeout - test ends regardless of state
-  maxDuration: HARD_TIMEOUT,
+  // Connection settings to reduce pool exhaustion
+  batch: 10,                    // Max parallel requests per VU
+  batchPerHost: 10,             // Max parallel requests per host
+  dns: { ttl: "1m" },           // Cache DNS for 1 minute
   
   scenarios: {
     // Main load test scenario
@@ -92,21 +95,14 @@ export const options = {
     },
   },
   thresholds: {
-    http_req_failed: [
-      {
-        threshold: "rate<0.02",
-        abortOnFail: true,
-        delayAbortEval: HOLD_ON_FAIL, // Hold and collect stats before abort
-      },
-    ],
     http_req_duration: [
       {
-        threshold: "p(95)<5000",
+        threshold: "p(95)<2000",  // Abort when 95th percentile exceeds 2s
         abortOnFail: true,
         delayAbortEval: HOLD_ON_FAIL,
       },
     ],
-    solr_qtime: ["p(95)<2000"], // Solr's self-reported time
+    solr_qtime: ["p(95)<2000"],   // Solr's self-reported time
   },
 };
 
@@ -122,7 +118,7 @@ export function setup() {
   console.log(`STATS_INTERVAL: ${STATS_INTERVAL}s`);
   console.log(`HARD_TIMEOUT: ${HARD_TIMEOUT} (absolute max duration)`);
   console.log(`HOLD_ON_FAIL: ${HOLD_ON_FAIL} (stats capture before abort)`);
-  console.log(`Aborts on >2% failures or p(95)>5s`);
+  console.log(`Aborts when p(95) response time exceeds 2s`);
   console.log(`========================================`);
   
   // Fetch and display key Solr system info
@@ -152,6 +148,17 @@ export default function () {
   const queryUrl = `${SOLR_URL}/solr/${SOLR_CORE}/select?q=${encodeURIComponent(word)}&wt=json&rows=10`;
   
   const res = http.get(queryUrl, params);
+  const vus = exec.instance.vusActive;
+  const duration = res.timings.duration;
+  
+  // Log failures with context
+  if (res.status !== 200) {
+    const failType = duration < 100 ? "CONN_FAIL" : "TIMEOUT";  // 0ms = connection issue
+    console.log(`${failType} [${vus} VUs] ${duration.toFixed(0)}ms - status=${res.status} error="${res.error || 'none'}" word="${word}"`);
+  } else if (duration > 2000) {
+    // Log slow but successful queries
+    console.log(`SLOW [${vus} VUs] ${duration.toFixed(0)}ms - word="${word}"`);
+  }
   
   // Parse response and extract Solr's QTime
   let qtime = 0;
@@ -246,8 +253,7 @@ export function handleSummary(data) {
       requestTimeout: "6s",
     },
     thresholds: {
-      httpReqFailed: "rate<0.02 (2%)",
-      httpReqDuration: "p(95)<5000ms",
+      httpReqDuration: "p(95)<2000ms",
       solrQtime: "p(95)<2000ms",
     },
     // ==================== TEST RESULTS ====================
