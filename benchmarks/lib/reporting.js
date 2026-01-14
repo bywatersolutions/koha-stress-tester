@@ -4,12 +4,14 @@
  * @param {Object} options - Options for formatting
  * @param {boolean} options.includeSolrQtime - Include Solr QTime metrics
  * @param {number} options.peakVUs - Manually tracked peak VUs (more accurate during abort)
+ * @param {number} options.thresholdPercentile - The percentile used for threshold (default 98)
  * @returns {string} Formatted summary string
  */
 export function formatSummary(data, options = {}) {
   const lines = ["", "=".repeat(60), "TEST SUMMARY", "=".repeat(60)];
 
   const m = data.metrics;
+  const pct = options.thresholdPercentile || 98;
 
   // Result overview - prefer manually tracked peak VUs over k6 metric
   const peakVUs = options.peakVUs || m.vus?.values?.max;
@@ -28,8 +30,9 @@ export function formatSummary(data, options = {}) {
   // Timing (using median - resistant to timeout skew)
   if (m.http_req_duration) {
     const d = m.http_req_duration.values;
+    const pctValue = d[`p(${pct})`]?.toFixed(2) || "N/A";
     lines.push(
-      `  http_req_duration.......: med=${d.med?.toFixed(2)}ms p(90)=${d["p(90)"]?.toFixed(2)}ms p(95)=${d["p(95)"]?.toFixed(2)}ms`,
+      `  http_req_duration.......: med=${d.med?.toFixed(2)}ms p(90)=${d["p(90)"]?.toFixed(2)}ms p(${pct})=${pctValue}ms`,
     );
   }
   if (m.http_req_waiting) {
@@ -39,8 +42,9 @@ export function formatSummary(data, options = {}) {
   }
   if (options.includeSolrQtime && m.solr_qtime) {
     const q = m.solr_qtime.values;
+    const pctValue = q[`p(${pct})`]?.toFixed(2) || "N/A";
     lines.push(
-      `  solr_qtime..............: med=${q.med?.toFixed(2)}ms p(95)=${q["p(95)"]?.toFixed(2)}ms`,
+      `  solr_qtime..............: med=${q.med?.toFixed(2)}ms p(${pct})=${pctValue}ms`,
     );
   }
 
@@ -94,17 +98,20 @@ export function calculateDerivedMetrics(data) {
 /**
  * Build timing section for summary
  * @param {Object} m - k6 metrics object
+ * @param {number} thresholdPercentile - The percentile used for threshold (default 98)
  * @returns {Object} Timing data
  */
-export function buildTimingSection(m) {
-  return {
+export function buildTimingSection(m, thresholdPercentile = 98) {
+  const result = {
     med_ms: m.http_req_duration?.values?.med?.toFixed(2) || null,
     p90_ms: m.http_req_duration?.values?.["p(90)"]?.toFixed(2) || null,
-    p95_ms: m.http_req_duration?.values?.["p(95)"]?.toFixed(2) || null,
     min_ms: m.http_req_duration?.values?.min?.toFixed(2) || null,
     max_ms: m.http_req_duration?.values?.max?.toFixed(2) || null,
     avg_ms_may_be_skewed: m.http_req_duration?.values?.avg?.toFixed(2) || null,
   };
+  // Add the threshold percentile dynamically
+  result[`p${thresholdPercentile}_ms`] = m.http_req_duration?.values?.[`p(${thresholdPercentile})`]?.toFixed(2) || null;
+  return result;
 }
 
 /**

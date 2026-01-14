@@ -84,6 +84,9 @@ export const options = {
   batchPerHost: 10,             // Max parallel requests per host
   dns: { ttl: "1m" },           // Cache DNS for 1 minute
   
+  // Include custom percentile in summary stats
+  summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", `p(${THRESHOLD_PERCENTILE})`],
+  
   scenarios: {
     // Main load test scenario
     load_test: {
@@ -282,7 +285,7 @@ export function handleSummary(data) {
       failureRate: `${((m.http_req_failed?.values?.rate || 0) * 100).toFixed(2)}%`,
       abortReason: abortReason,
     },
-    timing: reporting.buildTimingSection(m),
+    timing: reporting.buildTimingSection(m, THRESHOLD_PERCENTILE),
     timingBreakdown: reporting.buildTimingBreakdown(m),
     dataTransfer: reporting.buildDataTransfer(m),
     solrMetrics: {
@@ -300,7 +303,7 @@ export function handleSummary(data) {
   };
 
   const outputPath = OUTPUT_FILE || reporting.generateOutputPath("solr", TEST_NUMBER);
-  const consoleOutput = reporting.formatSummary(data, { includeSolrQtime: true, peakVUs: __peakVUs }) + `  Output: ${outputPath}\n`;
+  const consoleOutput = reporting.formatSummary(data, { includeSolrQtime: true, peakVUs: __peakVUs, thresholdPercentile: THRESHOLD_PERCENTILE }) + `  Output: ${outputPath}\n`;
 
   return {
     stdout: consoleOutput,

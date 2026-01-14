@@ -18,6 +18,8 @@ const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
 const THRESHOLD_MS = parseInt(__ENV.ASPEN_THRESHOLD_MS) || 6000; // Response time threshold in ms
 const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98; // Percentile to check (e.g., 98 = p(98))
+const REQUEST_TIMEOUT = __ENV.ASPEN_REQUEST_TIMEOUT || "10s"; // Request timeout
+const REQUEST_TIMEOUT_MS = parseInt(REQUEST_TIMEOUT) * 1000; // Convert to ms for comparison
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001"; // Test number for output filename
 
@@ -45,8 +47,20 @@ const params = {
     "User-Agent": "k6-stress-test",
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   },
-  timeout: "6s",  // Fail fast instead of hanging
+  timeout: REQUEST_TIMEOUT,
 };
+
+/**
+ * Log timeout or failure with actual duration
+ */
+function logIfFailed(res, label, vus) {
+  if (res.status !== 200) {
+    const duration = res.timings.duration;
+    const isTimeout = duration >= REQUEST_TIMEOUT_MS - 100; // Within 100ms of timeout
+    const failType = isTimeout ? "TIMEOUT" : "FAILED";
+    console.log(`${failType} [${vus} VUs] ${label}: ${duration.toFixed(0)}ms - status=${res.status} error="${res.error || 'none'}"`);
+  }
+}
 
 // ------------------------------------------------------------
 // Generate stages dynamically: ramp by VU_STEP, hold, repeat until MAX_VUS
@@ -65,6 +79,8 @@ function generateStages() {
 export const options = {
   insecureSkipTLSVerify: true,
   stages: generateStages(),
+  // Include custom percentile in summary stats
+  summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", `p(${THRESHOLD_PERCENTILE})`],
   thresholds: {
     http_req_duration: [
       {
@@ -81,7 +97,7 @@ export function setup() {
   console.log(`HOST_HEADER: ${HOST_HEADER}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
-  console.log(`THRESHOLD_MS: ${THRESHOLD_MS}`);
+  console.log(`THRESHOLD_MS: ${THRESHOLD_MS}, REQUEST_TIMEOUT: ${REQUEST_TIMEOUT}`);
   console.log(`Aborts when p(${THRESHOLD_PERCENTILE}) response time exceeds ${THRESHOLD_MS}ms`);
 }
 
@@ -115,6 +131,7 @@ export default function () {
 
   // Load homepage
   const homeRes = http.get(BASE_URL, params);
+  logIfFailed(homeRes, "homepage", currentVUs);
   check(homeRes, {
     "homepage loaded": (r) => r.status === 200,
   });
@@ -125,6 +142,7 @@ export default function () {
   // Perform search
   const searchUrl = `${BASE_URL}/Union/Search?view=list&lookfor=${encodeURIComponent(searchTerm)}&searchIndex=Keyword&searchSource=local`;
   const searchRes = http.get(searchUrl, params);
+  logIfFailed(searchRes, `search "${searchTerm}"`, currentVUs);
   check(searchRes, {
     "search completed": (r) => r.status === 200,
     "response < 500ms": (r) => r.timings.duration < 500,
@@ -158,6 +176,7 @@ export default function () {
     }
 
     const recordRes = http.get(recordUrl, params);
+    logIfFailed(recordRes, "record", currentVUs);
     check(recordRes, {
       "record loaded": (r) => r.status === 200,
     });
@@ -197,7 +216,7 @@ export function handleSummary(data) {
       vuStep: VU_STEP,
       rampTime: RAMP_TIME,
       holdTime: HOLD_TIME,
-      requestTimeout: "6s",
+      requestTimeout: REQUEST_TIMEOUT,
       solrUrl: SOLR_URL || "(not configured)",
     },
     thresholds: {
@@ -214,7 +233,7 @@ export function handleSummary(data) {
       failureRate: `${((m.http_req_failed?.values?.rate || 0) * 100).toFixed(2)}%`,
       abortReason: abortReason,
     },
-    timing: reporting.buildTimingSection(m),
+    timing: reporting.buildTimingSection(m, THRESHOLD_PERCENTILE),
     timingBreakdown: reporting.buildTimingBreakdown(m),
     dataTransfer: reporting.buildDataTransfer(m),
     checks: reporting.extractChecks(data),
@@ -223,7 +242,7 @@ export function handleSummary(data) {
   };
 
   const outputPath = OUTPUT_FILE || reporting.generateOutputPath("aspen", TEST_NUMBER);
-  const consoleOutput = reporting.formatSummary(data, { peakVUs: __peakVUs }) + `  Output: ${outputPath}\n`;
+  const consoleOutput = reporting.formatSummary(data, { peakVUs: __peakVUs, thresholdPercentile: THRESHOLD_PERCENTILE }) + `  Output: ${outputPath}\n`;
 
   return {
     stdout: consoleOutput,
