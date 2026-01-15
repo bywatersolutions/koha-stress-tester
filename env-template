@@ -24,7 +24,7 @@ BENCH=aspen_http.js
 K6_IMAGE_TAG=latest
 
 # ============================================================
-# k6 Test Parameters
+# Browser Mode Parameters (aspen.js, koha.js only)
 # ============================================================
 VUS=1
 ITERATIONS=1
@@ -42,6 +42,12 @@ HOST_HEADER=INST.aspendiscovery.org
 # Number of search results to click through per iteration
 RESULTS_TO_CLICK=5
 
+# Think time between actions (aspen_http.js only)
+# Not set or empty = random delays (realistic user simulation)
+# 0, off, false, disabled = no delays (fast queries for monitoring)
+# Number = fixed delay in seconds (e.g., 2 = 2 second pause)
+#THINK_TIME=off
+
 # ============================================================
 # Staged Load Test Parameters
 # ============================================================
@@ -55,9 +61,13 @@ HOLD_TIME=5s
 # Lower percentile = more tolerant of slow outliers (e.g., 90 = allow 10% slow)
 # Higher percentile = stricter (e.g., 99 = only allow 1% slow)
 THRESHOLD_PERCENTILE=98
-ASPEN_THRESHOLD_MS=6000
+ASPEN_THRESHOLD_MS=8000
 ASPEN_REQUEST_TIMEOUT=10s
 SOLR_THRESHOLD_MS=2000
+
+# Console logging: log individual slow requests above this threshold (ms)
+ASPEN_SLOW_LOG_MS=6000
+SOLR_SLOW_LOG_MS=2000
 STATS_INTERVAL=10
 HARD_TIMEOUT=30m
 HOLD_ON_FAIL=30s

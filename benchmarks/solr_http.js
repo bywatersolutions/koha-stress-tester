@@ -3,6 +3,7 @@ import { check, sleep } from "k6";
 import { SharedArray } from "k6/data";
 import { Trend, Counter } from "k6/metrics";
 import exec from "k6/execution";
+import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 import * as reporting from "./lib/reporting.js";
 import * as solr from "./lib/solr.js";
 
@@ -17,7 +18,8 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
-const THRESHOLD_MS = parseInt(__ENV.SOLR_THRESHOLD_MS) || 2000; // Response time threshold in ms
+const THRESHOLD_MS = parseInt(__ENV.SOLR_THRESHOLD_MS) || 2000; // Response time threshold for test abort (ms)
+const SLOW_LOG_MS = parseInt(__ENV.SOLR_SLOW_LOG_MS) || 2000; // Threshold for logging slow requests to console (ms)
 const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98; // Percentile to check (e.g., 98 = p(98))
 const STATS_INTERVAL = parseInt(__ENV.STATS_INTERVAL) || 10; // seconds between stats collection
 const HARD_TIMEOUT = __ENV.HARD_TIMEOUT || "30m"; // Hard timeout - ends test regardless of state
@@ -123,11 +125,11 @@ export function setup() {
   console.log(`SOLR_USER: ${SOLR_USER ? "(set)" : "(not set)"}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
-  console.log(`THRESHOLD_MS: ${THRESHOLD_MS}`);
+  console.log(`THRESHOLD_MS: ${THRESHOLD_MS} (abort test when p(${THRESHOLD_PERCENTILE}) exceeds this)`);
+  console.log(`SLOW_LOG_MS: ${SLOW_LOG_MS} (log slow requests to console)`);
   console.log(`STATS_INTERVAL: ${STATS_INTERVAL}s`);
   console.log(`HARD_TIMEOUT: ${HARD_TIMEOUT} (absolute max duration)`);
   console.log(`HOLD_ON_FAIL: ${HOLD_ON_FAIL} (stats capture before abort)`);
-  console.log(`Aborts when p(${THRESHOLD_PERCENTILE}) response time exceeds ${THRESHOLD_MS}ms`);
   console.log(`========================================`);
   
   // Fetch and display key Solr system info
@@ -170,7 +172,7 @@ export default function () {
   if (res.status !== 200) {
     const failType = duration < 100 ? "CONN_FAIL" : "TIMEOUT";  // 0ms = connection issue
     console.log(`${failType} [${vus} VUs] ${duration.toFixed(0)}ms - status=${res.status} error="${res.error || 'none'}" word="${word}"`);
-  } else if (duration > 2000) {
+  } else if (duration > SLOW_LOG_MS) {
     // Log slow but successful queries
     console.log(`SLOW [${vus} VUs] ${duration.toFixed(0)}ms - word="${word}"`);
   }
@@ -303,10 +305,10 @@ export function handleSummary(data) {
   };
 
   const outputPath = OUTPUT_FILE || reporting.generateOutputPath("solr", TEST_NUMBER);
-  const consoleOutput = reporting.formatSummary(data, { includeSolrQtime: true, peakVUs: __peakVUs, thresholdPercentile: THRESHOLD_PERCENTILE }) + `  Output: ${outputPath}\n`;
+  const customSummary = reporting.formatSummary(data, { includeSolrQtime: true, peakVUs: __peakVUs, thresholdPercentile: THRESHOLD_PERCENTILE }) + `  Output: ${outputPath}\n`;
 
   return {
-    stdout: consoleOutput,
+    stdout: textSummary(data, { indent: "  ", enableColors: true }) + "\n" + customSummary,
     [outputPath]: JSON.stringify(summary, null, 2),
   };
 }

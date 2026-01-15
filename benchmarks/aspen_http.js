@@ -3,6 +3,7 @@ import { sleep, check } from "k6";
 import { parseHTML } from "k6/html";
 import { SharedArray } from "k6/data";
 import exec from "k6/execution";
+import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 import * as reporting from "./lib/reporting.js";
 import * as solr from "./lib/solr.js";
 
@@ -16,12 +17,35 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
-const THRESHOLD_MS = parseInt(__ENV.ASPEN_THRESHOLD_MS) || 6000; // Response time threshold in ms
+const THRESHOLD_MS = parseInt(__ENV.ASPEN_THRESHOLD_MS) || 12000; // Response time threshold for test abort (ms)
 const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98; // Percentile to check (e.g., 98 = p(98))
 const REQUEST_TIMEOUT = __ENV.ASPEN_REQUEST_TIMEOUT || "10s"; // Request timeout
 const REQUEST_TIMEOUT_MS = parseInt(REQUEST_TIMEOUT) * 1000; // Convert to ms for comparison
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001"; // Test number for output filename
+
+// Think time configuration: controls pauses between actions
+// Not set or empty = random think time (realistic user simulation)
+// "0", "off", "false", "disabled" = no think time (fast queries)
+// Number = fixed think time in seconds
+const THINK_TIME_RAW = __ENV.THINK_TIME || "";
+const THINK_TIME_DISABLED = ["0", "off", "false", "disabled"].includes(THINK_TIME_RAW.toLowerCase());
+const THINK_TIME_FIXED = !THINK_TIME_DISABLED && THINK_TIME_RAW ? parseFloat(THINK_TIME_RAW) : null;
+
+/**
+ * Sleep based on THINK_TIME configuration
+ * @param {number} maxRandom - Maximum random seconds (used when THINK_TIME not set)
+ */
+function thinkTime(maxRandom) {
+  if (THINK_TIME_DISABLED) {
+    return; // No sleep
+  }
+  if (THINK_TIME_FIXED !== null) {
+    sleep(THINK_TIME_FIXED);
+  } else {
+    sleep(Math.random() * maxRandom);
+  }
+}
 
 // Solr configuration (optional - for capturing backend system info)
 const SOLR_URL = __ENV.SOLR_URL || "";
@@ -50,15 +74,21 @@ const params = {
   timeout: REQUEST_TIMEOUT,
 };
 
+// Threshold for logging slow (but successful) requests to console (ms)
+const SLOW_LOG_MS = parseInt(__ENV.ASPEN_SLOW_LOG_MS) || 6000;
+
 /**
- * Log timeout or failure with actual duration
+ * Log timeout, failure, or slow successful request with actual duration
  */
-function logIfFailed(res, label, vus) {
+function logRequestStatus(res, label, vus) {
+  const duration = res.timings.duration;
   if (res.status !== 200) {
-    const duration = res.timings.duration;
     const isTimeout = duration >= REQUEST_TIMEOUT_MS - 100; // Within 100ms of timeout
     const failType = isTimeout ? "TIMEOUT" : "FAILED";
     console.log(`${failType} [${vus} VUs] ${label}: ${duration.toFixed(0)}ms - status=${res.status} error="${res.error || 'none'}"`);
+  } else if (duration > SLOW_LOG_MS) {
+    // Log slow but successful requests
+    console.log(`SLOW [${vus} VUs] ${label}: ${duration.toFixed(0)}ms`);
   }
 }
 
@@ -97,8 +127,11 @@ export function setup() {
   console.log(`HOST_HEADER: ${HOST_HEADER}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
-  console.log(`THRESHOLD_MS: ${THRESHOLD_MS}, REQUEST_TIMEOUT: ${REQUEST_TIMEOUT}`);
-  console.log(`Aborts when p(${THRESHOLD_PERCENTILE}) response time exceeds ${THRESHOLD_MS}ms`);
+  console.log(`THRESHOLD_MS: ${THRESHOLD_MS} (abort test when p(${THRESHOLD_PERCENTILE}) exceeds this)`);
+  console.log(`SLOW_LOG_MS: ${SLOW_LOG_MS} (log slow requests to console)`);
+  console.log(`REQUEST_TIMEOUT: ${REQUEST_TIMEOUT}`);
+  const thinkTimeStatus = THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s fixed` : "random");
+  console.log(`THINK_TIME: ${thinkTimeStatus}`);
 }
 
 export function teardown(data) {
@@ -131,18 +164,18 @@ export default function () {
 
   // Load homepage
   const homeRes = http.get(BASE_URL, params);
-  logIfFailed(homeRes, "homepage", currentVUs);
+  logRequestStatus(homeRes, "homepage", currentVUs);
   check(homeRes, {
     "homepage loaded": (r) => r.status === 200,
   });
 
   // Simulate user think time before typing search
-  sleep(Math.random() * 3);
+  thinkTime(3);
 
   // Perform search
   const searchUrl = `${BASE_URL}/Union/Search?view=list&lookfor=${encodeURIComponent(searchTerm)}&searchIndex=Keyword&searchSource=local`;
   const searchRes = http.get(searchUrl, params);
-  logIfFailed(searchRes, `search "${searchTerm}"`, currentVUs);
+  logRequestStatus(searchRes, `search "${searchTerm}"`, currentVUs);
   check(searchRes, {
     "search completed": (r) => r.status === 200,
     "response < 500ms": (r) => r.timings.duration < 500,
@@ -151,7 +184,7 @@ export default function () {
   });
 
   // Simulate user scanning results (longer think time)
-  sleep(Math.random() * 10);
+  thinkTime(10);
 
   // Parse results and extract record links
   const doc = parseHTML(searchRes.body);
@@ -176,16 +209,16 @@ export default function () {
     }
 
     const recordRes = http.get(recordUrl, params);
-    logIfFailed(recordRes, "record", currentVUs);
+    logRequestStatus(recordRes, "record", currentVUs);
     check(recordRes, {
       "record loaded": (r) => r.status === 200,
     });
 
     // Simulate user reading the record
-    sleep(Math.random() * 10);
+    thinkTime(10);
 
     // Brief pause before next click
-    sleep(Math.random() * 3);
+    thinkTime(3);
   }
 }
 
@@ -242,10 +275,10 @@ export function handleSummary(data) {
   };
 
   const outputPath = OUTPUT_FILE || reporting.generateOutputPath("aspen", TEST_NUMBER);
-  const consoleOutput = reporting.formatSummary(data, { peakVUs: __peakVUs, thresholdPercentile: THRESHOLD_PERCENTILE }) + `  Output: ${outputPath}\n`;
+  const customSummary = reporting.formatSummary(data, { peakVUs: __peakVUs, thresholdPercentile: THRESHOLD_PERCENTILE }) + `  Output: ${outputPath}\n`;
 
   return {
-    stdout: consoleOutput,
+    stdout: textSummary(data, { indent: "  ", enableColors: true }) + "\n" + customSummary,
     [outputPath]: JSON.stringify(summary, null, 2),
   };
 }
