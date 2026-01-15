@@ -6,6 +6,7 @@ import exec from "k6/execution";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 import * as reporting from "./lib/reporting.js";
 import * as solr from "./lib/solr.js";
+import { randomElement } from "./lib/utils.js";
 
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
@@ -17,29 +18,24 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
-const ABORT_MS = parseInt(__ENV.ASPEN_ABORT_MS) || 12000; // Response time threshold - abort test when p(X) exceeds this
-const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98; // Percentile to check (e.g., 98 = p(98))
-const MAX_FAIL_CON_RATE = parseFloat(__ENV.ASPEN_MAX_FAIL_CON_RATE) || 0.05; // Max failure/connection rate before abort (0.05 = 5%)
-const REQUEST_TIMEOUT = __ENV.ASPEN_REQUEST_TIMEOUT || "10s"; // Request timeout
-const REQUEST_TIMEOUT_MS = parseInt(REQUEST_TIMEOUT) * 1000; // Convert to ms for comparison
-const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
-const TEST_NUMBER = __ENV.TEST_NUMBER || "001"; // Test number for output filename
+const ABORT_MS = parseInt(__ENV.ASPEN_ABORT_MS) || 12000;
+const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98;
+const MAX_FAIL_CON_RATE = parseFloat(__ENV.ASPEN_MAX_FAIL_CON_RATE) || 0.05;
+const REQUEST_TIMEOUT = __ENV.ASPEN_REQUEST_TIMEOUT || "10s";
+const REQUEST_TIMEOUT_MS = parseInt(REQUEST_TIMEOUT) * 1000;
+const HOLD_ON_FAIL = __ENV.HOLD_ON_FAIL || "30s";
+const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
+const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
+const SLOW_LOG_MS = parseInt(__ENV.ASPEN_SLOW_LOG_MS) || 6000;
 
-// Think time configuration: controls pauses between actions
-// Not set or empty = random think time (realistic user simulation)
-// "0", "off", "false", "disabled" = no think time (fast queries)
-// Number = fixed think time in seconds
+// Think time configuration
 const THINK_TIME_RAW = __ENV.THINK_TIME || "";
 const THINK_TIME_DISABLED = ["0", "off", "false", "disabled"].includes(THINK_TIME_RAW.toLowerCase());
 const THINK_TIME_FIXED = !THINK_TIME_DISABLED && THINK_TIME_RAW ? parseFloat(THINK_TIME_RAW) : null;
 
-/**
- * Sleep based on THINK_TIME configuration
- * @param {number} maxRandom - Maximum random seconds (used when THINK_TIME not set)
- */
 function thinkTime(maxRandom) {
   if (THINK_TIME_DISABLED) {
-    return; // No sleep
+    return;
   }
   if (THINK_TIME_FIXED !== null) {
     sleep(THINK_TIME_FIXED);
@@ -54,18 +50,13 @@ const SOLR_USER = __ENV.SOLR_USER || "";
 const SOLR_PASS = __ENV.SOLR_PASS || "";
 const solrHeaders = SOLR_URL ? solr.getSolrHeaders(SOLR_USER, SOLR_PASS) : null;
 
-// Storage for system info captured in teardown
 let __finalSolrSystemInfo = null;
-
-// Track peak VUs during execution (before teardown/abort delays)
 let __peakVUs = 0;
 
-// Load words from file
 const words = new SharedArray("words", function () {
   return open("./words_alpha.txt").split(/\r?\n/).filter(w => w.trim());
 });
 
-// Default request params
 const params = {
   headers: {
     Host: HOST_HEADER,
@@ -75,62 +66,53 @@ const params = {
   timeout: REQUEST_TIMEOUT,
 };
 
-// Threshold for logging slow (but successful) requests to console (ms)
-const SLOW_LOG_MS = parseInt(__ENV.ASPEN_SLOW_LOG_MS) || 6000;
-
-/**
- * Log timeout, failure, or slow successful request with actual duration
- */
 function logRequestStatus(res, label, vus) {
   const duration = res.timings.duration;
   if (res.status !== 200) {
-    const isTimeout = duration >= REQUEST_TIMEOUT_MS - 100; // Within 100ms of timeout
+    const isTimeout = duration >= REQUEST_TIMEOUT_MS - 100;
     const failType = isTimeout ? "TIMEOUT" : "FAILED";
     console.log(`${failType} [${vus} VUs] ${label}: ${duration.toFixed(0)}ms - status=${res.status} error="${res.error || 'none'}"`);
   } else if (duration > SLOW_LOG_MS) {
-    // Log slow but successful requests
     console.log(`SLOW [${vus} VUs] ${label}: ${duration.toFixed(0)}ms`);
   }
 }
 
-// ------------------------------------------------------------
-// Generate stages dynamically: ramp by VU_STEP, hold, repeat until MAX_VUS
-// Aborts when p(THRESHOLD_PERCENTILE) response time exceeds ABORT_MS
-// ------------------------------------------------------------
 function generateStages() {
   const stages = [];
   for (let vus = VU_STEP; vus <= MAX_VUS; vus += VU_STEP) {
     stages.push({ duration: RAMP_TIME, target: vus });
     stages.push({ duration: HOLD_TIME, target: vus });
   }
-  stages.push({ duration: RAMP_TIME, target: 0 }); // Ramp down
+  stages.push({ duration: RAMP_TIME, target: 0 });
   return stages;
 }
 
 export const options = {
   insecureSkipTLSVerify: true,
   stages: generateStages(),
-  // Include custom percentile in summary stats
   summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", `p(${THRESHOLD_PERCENTILE})`],
   thresholds: {
     http_req_duration: [
       {
         threshold: `p(${THRESHOLD_PERCENTILE})<${ABORT_MS}`,
         abortOnFail: true,
-        delayAbortEval: "30s",
+        delayAbortEval: HOLD_ON_FAIL,
       },
     ],
     http_req_failed: [
       {
         threshold: `rate<${MAX_FAIL_CON_RATE}`,
         abortOnFail: true,
-        delayAbortEval: "30s",
+        delayAbortEval: HOLD_ON_FAIL,
       },
     ],
   },
 };
 
 export function setup() {
+  console.log(`========================================`);
+  console.log(`ASPEN HTTP BENCHMARK TEST`);
+  console.log(`========================================`);
   console.log(`BASE_URL: ${BASE_URL}`);
   console.log(`HOST_HEADER: ${HOST_HEADER}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
@@ -139,16 +121,17 @@ export function setup() {
   console.log(`MAX_FAIL_CON_RATE: ${(MAX_FAIL_CON_RATE * 100).toFixed(0)}% (abort test when failure rate exceeds this)`);
   console.log(`SLOW_LOG_MS: ${SLOW_LOG_MS} (log slow requests to console)`);
   console.log(`REQUEST_TIMEOUT: ${REQUEST_TIMEOUT}`);
+  console.log(`HOLD_ON_FAIL: ${HOLD_ON_FAIL}`);
   const thinkTimeStatus = THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s fixed` : "random");
   console.log(`THINK_TIME: ${thinkTimeStatus}`);
+  console.log(`========================================`);
 }
 
-export function teardown(data) {
+export function teardown() {
   console.log(`\n========================================`);
   console.log(`TEST COMPLETE`);
   console.log(`========================================`);
   
-  // Capture Solr system info if configured
   if (SOLR_URL) {
     console.log(`Capturing Solr system info...`);
     __finalSolrSystemInfo = solr.fetchSolrSystemInfo(SOLR_URL, solrHeaders);
@@ -159,29 +142,22 @@ export function teardown(data) {
   }
 }
 
-/**
- * Main test function that runs for each VU (Virtual User)
- */
 export default function () {
-  // Track peak VUs in real-time (before any abort/teardown delays)
   const currentVUs = exec.instance.vusActive;
   if (currentVUs > __peakVUs) {
     __peakVUs = currentVUs;
   }
 
-  const searchTerm = words[Math.floor(Math.random() * words.length)];
+  const searchTerm = randomElement(words);
 
-  // Load homepage
   const homeRes = http.get(BASE_URL, params);
   logRequestStatus(homeRes, "homepage", currentVUs);
   check(homeRes, {
     "homepage loaded": (r) => r.status === 200,
   });
 
-  // Simulate user think time before typing search
   thinkTime(3);
 
-  // Perform search
   const searchUrl = `${BASE_URL}/Union/Search?view=list&lookfor=${encodeURIComponent(searchTerm)}&searchIndex=Keyword&searchSource=local`;
   const searchRes = http.get(searchUrl, params);
   logRequestStatus(searchRes, `search "${searchTerm}"`, currentVUs);
@@ -192,10 +168,8 @@ export default function () {
     "response < 2000ms": (r) => r.timings.duration < 2000,
   });
 
-  // Simulate user scanning results (longer think time)
   thinkTime(10);
 
-  // Parse results and extract record links
   const doc = parseHTML(searchRes.body);
   const resultLinks = [];
   
@@ -206,13 +180,11 @@ export default function () {
     }
   });
 
-  // Click through results
   const clickCount = Math.min(RESULTS_TO_CLICK, resultLinks.length);
   for (let i = 0; i < clickCount; i++) {
     const idx = Math.floor(Math.random() * resultLinks.length);
     let recordUrl = resultLinks[idx];
     
-    // Make absolute if relative
     if (recordUrl.startsWith("/")) {
       recordUrl = `${BASE_URL}${recordUrl}`;
     }
@@ -223,28 +195,21 @@ export default function () {
       "record loaded": (r) => r.status === 200,
     });
 
-    // Simulate user reading the record
     thinkTime(10);
-
-    // Brief pause before next click
     thinkTime(3);
   }
 }
 
-// Handle summary - export results to JSON file (runs even on threshold abort)
 export function handleSummary(data) {
   const m = data.metrics;
   const abortReason = reporting.getAbortReason(data);
   const { totalRequests, testDuration, rps } = reporting.calculateDerivedMetrics(data);
   
-  // Use system info captured in teardown, or fetch now if not available
   const solrSystemInfo = SOLR_URL 
     ? (__finalSolrSystemInfo || solr.fetchSolrSystemInfo(SOLR_URL, solrHeaders))
     : null;
 
-  // Build clean, focused summary
   const summary = {
-    // ==================== TEST SETTINGS ====================
     metadata: {
       testScript: "aspen_http.js",
       testNumber: TEST_NUMBER,
@@ -264,13 +229,13 @@ export function handleSummary(data) {
       maxFailRate: `${(MAX_FAIL_CON_RATE * 100).toFixed(0)}%`,
       slowLogMs: SLOW_LOG_MS,
       requestTimeout: REQUEST_TIMEOUT,
+      holdOnFail: HOLD_ON_FAIL,
       solrUrl: SOLR_URL || "(not configured)",
     },
     thresholds: {
       httpReqDuration: `p(${THRESHOLD_PERCENTILE})<${ABORT_MS}ms`,
       httpReqFailed: `rate<${(MAX_FAIL_CON_RATE * 100).toFixed(0)}%`,
     },
-    // ==================== TEST RESULTS ====================
     result: {
       peakVUs: __peakVUs || m.vus?.values?.max || 0,
       configuredMaxVUs: MAX_VUS,
@@ -285,7 +250,6 @@ export function handleSummary(data) {
     timingBreakdown: reporting.buildTimingBreakdown(m),
     dataTransfer: reporting.buildDataTransfer(m),
     checks: reporting.extractChecks(data),
-    // ==================== SYSTEM INFORMATION ====================
     solrSystem: solrSystemInfo,
   };
 

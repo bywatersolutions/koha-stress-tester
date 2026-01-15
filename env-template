@@ -5,7 +5,7 @@
 # ============================================================
 
 # ============================================================
-# Docker User (for rootless compatibility)
+# Run docker as user
 # ============================================================
 # Run: id -u and id -g to get your values
 UID=1000
@@ -13,10 +13,10 @@ GID=1000
 
 # BENCH: Which benchmark to run
 #   - aspen_http.js  (Aspen, HTTP mode for headless servers)
-#   - aspen.js       (Aspen, browser mode)
+#   - aspen_browser.js (Aspen, browser mode)
 #   - koha.js        (Koha, browser mode)
 #   - solr_http.js   (Solr Cloud direct queries)
-BENCH=aspen_http.js
+BENCH=solr_http.js
 
 # K6_IMAGE_TAG: Docker image to use
 #   - latest              (HTTP mode, smaller image)
@@ -24,39 +24,50 @@ BENCH=aspen_http.js
 K6_IMAGE_TAG=latest
 
 # ============================================================
-# Browser Mode Parameters (aspen.js, koha.js only)
+# Target URLs & Credentials (CONFIGURE THESE FIRST)
+# ============================================================
+
+# Aspen Discovery (aspen_browser.js, aspen_http.js)
+BASE_URL=https://localhost
+# If BASE_URL is localhost, set HOST_HEADER to the real domain
+# Comment this out if hitting the domain directly
+HOST_HEADER=INST.aspendiscovery.org
+
+# Solr (solr_http.js)
+SOLR_URL=http://solr.gke.aspendiscovery.org
+SOLR_CORE=grouped_works_v2
+SOLR_USER=
+SOLR_PASS=
+
+# Koha (koha.js)
+STAFF_URL=https://kohadev-intra.localhost
+OPAC_URL=https://kohadev.localhost
+STAFF_USER=koha
+STAFF_PASS=koha
+
+# ============================================================
+# Browser Mode Parameters (aspen_browser.js, koha.js only)
 # ============================================================
 VUS=1
 ITERATIONS=1
 
-# ============================================================
-# Aspen Discovery Configuration
-# ============================================================
-# Used with aspen.js or aspen_http.js
-
-BASE_URL=https://localhost
-
-# If BASE_URL is localhost, set HOST_HEADER to the real domain
-HOST_HEADER=INST.aspendiscovery.org
+# K6_BROWSER_HEADLESS: Run browser in headless mode (no visible window)
+# true = headless (default, faster, works in containers)
+# false = visible browser window (useful for debugging, requires display)
+K6_BROWSER_HEADLESS=true
 
 # Number of search results to click through per iteration
 RESULTS_TO_CLICK=5
 
-# Think time between actions (aspen_http.js only)
-# Not set or empty = random delays (realistic user simulation)
-# 0, off, false, disabled = no delays (fast queries for monitoring)
-# Number = fixed delay in seconds (e.g., 2 = 2 second pause)
-#THINK_TIME=off
-
 # ============================================================
-# Staged Load Test Parameters
+# Staged Load Test Parameters (aspen_http.js, solr_http.js)
 # ============================================================
-# Used with aspen_http.js and solr_http.js
 
-MAX_VUS=300
+MAX_VUS=150
 VU_STEP=10
 RAMP_TIME=5s
 HOLD_TIME=5s
+
 # Abort test when p(THRESHOLD_PERCENTILE) response time exceeds ABORT threshold
 # Lower percentile = more tolerant of slow outliers (e.g., 90 = allow 10% slow)
 # Higher percentile = stricter (e.g., 99 = only allow 1% slow)
@@ -73,35 +84,19 @@ SOLR_MAX_FAIL_CON_RATE=0.05
 
 # Console logging: log individual slow requests above this threshold (ms)
 ASPEN_SLOW_LOG_MS=6000
-SOLR_SLOW_LOG_MS=2000
+SOLR_SLOW_LOG_MS=800
 STATS_INTERVAL=10
 HARD_TIMEOUT=30m
 HOLD_ON_FAIL=30s
+
+# Think time between actions (aspen_http.js only)
+#   (blank)  = random delays (realistic user simulation)
+#   off      = no delays (maximum request rate)
+#   2        = fixed 2-second delay (or any number)
+THINK_TIME=
 
 # Output file for JSON results (leave empty for auto-generated names)
 # File is written to ./output/ directory
 # Format: script-testnumber-shortdate-time.json (e.g., solr-001-20260108-2345.json)
 # Test number auto-increments based on existing files in output/
 OUTPUT_FILE=
-
-# ============================================================
-# Solr Cloud Configuration
-# ============================================================
-# Used with solr_http.js
-
-SOLR_URL=http://solr.gke.aspendiscovery.org
-SOLR_CORE=grouped_works_v2
-SOLR_USER=
-SOLR_PASS=
-
-# ============================================================
-# Koha Configuration
-# ============================================================
-# Used with koha.js
-
-STAFF_URL=https://kohadev-intra.localhost
-OPAC_URL=https://kohadev.localhost
-
-# Staff user credentials for API access and login
-STAFF_USER=koha
-STAFF_PASS=koha

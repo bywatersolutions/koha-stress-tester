@@ -6,6 +6,7 @@ import exec from "k6/execution";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 import * as reporting from "./lib/reporting.js";
 import * as solr from "./lib/solr.js";
+import { randomElement } from "./lib/utils.js";
 
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
@@ -18,48 +19,37 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
-const ABORT_MS = parseInt(__ENV.SOLR_ABORT_MS) || 2000; // Response time threshold - abort test when p(X) exceeds this
-const MAX_FAIL_CON_RATE = parseFloat(__ENV.SOLR_MAX_FAIL_CON_RATE) || 0.05; // Max failure/connection rate before abort (0.05 = 5%)
-const SLOW_LOG_MS = parseInt(__ENV.SOLR_SLOW_LOG_MS) || 2000; // Threshold for logging slow requests to console (ms)
-const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98; // Percentile to check (e.g., 98 = p(98))
-const STATS_INTERVAL = parseInt(__ENV.STATS_INTERVAL) || 10; // seconds between stats collection
-const HARD_TIMEOUT = __ENV.HARD_TIMEOUT || "30m"; // Hard timeout - ends test regardless of state
-const HOLD_ON_FAIL = __ENV.HOLD_ON_FAIL || "30s"; // Time to collect stats after threshold crossed
-const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
-const TEST_NUMBER = __ENV.TEST_NUMBER || "001"; // Test number for output filename
+const ABORT_MS = parseInt(__ENV.SOLR_ABORT_MS) || 2000;
+const MAX_FAIL_CON_RATE = parseFloat(__ENV.SOLR_MAX_FAIL_CON_RATE) || 0.05;
+const SLOW_LOG_MS = parseInt(__ENV.SOLR_SLOW_LOG_MS) || 2000;
+const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98;
+const STATS_INTERVAL = parseInt(__ENV.STATS_INTERVAL) || 10;
+const HARD_TIMEOUT = __ENV.HARD_TIMEOUT || "30m";
+const HOLD_ON_FAIL = __ENV.HOLD_ON_FAIL || "30s";
+const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
+const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
 
-// Load words from file
 const words = new SharedArray("words", function () {
   return open("./words_alpha.txt").split(/\r?\n/).filter(w => w.trim());
 });
 
 // Custom metrics for Solr's self-reported times
-const solrQTime = new Trend("solr_qtime", true);           // Solr's reported query time (ms)
-const solrNumFound = new Trend("solr_num_found", true);    // Results count
+const solrQTime = new Trend("solr_qtime", true);
+const solrNumFound = new Trend("solr_num_found", true);
 const solrQTimeOver100 = new Counter("solr_qtime_over_100ms");
 const solrQTimeOver500 = new Counter("solr_qtime_over_500ms");
 const solrQTimeOver1000 = new Counter("solr_qtime_over_1000ms");
 
-
-// Storage for system info captured in teardown (shared with handleSummary)
 let __finalSolrSystemInfo = null;
-
-// Track peak VUs during execution (before teardown/abort delays)
 let __peakVUs = 0;
 
-
-// Get auth headers using shared function
 const headers = solr.getSolrHeaders(SOLR_USER, SOLR_PASS);
 
-// Default request params
 const params = {
   headers: headers,
-  timeout: "30s",  // Allow slow queries to complete so we can measure them
+  timeout: "30s",
 };
 
-// ------------------------------------------------------------
-// Generate stages dynamically
-// ------------------------------------------------------------
 function generateStages() {
   const stages = [];
   for (let vus = VU_STEP; vus <= MAX_VUS; vus += VU_STEP) {
@@ -70,39 +60,32 @@ function generateStages() {
   return stages;
 }
 
-// Calculate total test duration for stats collector
 function getTotalDuration() {
   const rampSecs = parseInt(RAMP_TIME) || 5;
   const holdSecs = parseInt(HOLD_TIME) || 5;
   const numSteps = Math.ceil(MAX_VUS / VU_STEP);
-  const totalSecs = (numSteps * (rampSecs + holdSecs)) + rampSecs + 30; // +30 buffer
+  const totalSecs = (numSteps * (rampSecs + holdSecs)) + rampSecs + 10;
   return `${totalSecs}s`;
 }
 
 export const options = {
   insecureSkipTLSVerify: true,
-  
-  // Connection settings to reduce pool exhaustion
-  batch: 10,                    // Max parallel requests per VU
-  batchPerHost: 10,             // Max parallel requests per host
-  dns: { ttl: "1m" },           // Cache DNS for 1 minute
-  
-  // Include custom percentile in summary stats
+  batch: 10,
+  batchPerHost: 10,
+  dns: { ttl: "1m" },
   summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", `p(${THRESHOLD_PERCENTILE})`],
-  
   scenarios: {
-    // Main load test scenario
     load_test: {
       executor: "ramping-vus",
       stages: generateStages(),
       gracefulRampDown: "10s",
     },
-    // Stats collector - single VU polling Solr metrics
     stats_collector: {
       executor: "constant-vus",
       vus: 1,
       duration: getTotalDuration(),
       exec: "collectStats",
+      gracefulStop: "0s",
     },
   },
   thresholds: {
@@ -141,7 +124,6 @@ export function setup() {
   console.log(`HOLD_ON_FAIL: ${HOLD_ON_FAIL} (stats capture before abort)`);
   console.log(`========================================`);
   
-  // Fetch and display key Solr system info
   try {
     const sysInfoUrl = `${SOLR_URL}/solr/admin/info/system?wt=json`;
     const res = http.get(sysInfoUrl, { headers, timeout: "10s" });
@@ -156,37 +138,28 @@ export function setup() {
     console.log(`Warning: Could not fetch Solr system info: ${e.message}`);
   }
   
-  // Initial stats snapshot
   solr.collectSolrMetrics(SOLR_URL, SOLR_CORE, headers, "BASELINE");
 }
 
-// Main load test function
-// Each VU executes 1 query per second, so N VUs = N queries/second
 export default function () {
-  // Track peak VUs in real-time (before any abort/teardown delays)
   const vus = exec.instance.vusActive;
   if (vus > __peakVUs) {
     __peakVUs = vus;
   }
 
-  const word = words[Math.floor(Math.random() * words.length)];
-  
-  // Solr select query with debug timing
+  const word = randomElement(words);
   const queryUrl = `${SOLR_URL}/solr/${SOLR_CORE}/select?q=${encodeURIComponent(word)}&wt=json&rows=10`;
   
   const res = http.get(queryUrl, params);
   const duration = res.timings.duration;
   
-  // Log failures with context
   if (res.status !== 200) {
-    const failType = duration < 100 ? "CONN_FAIL" : "TIMEOUT";  // 0ms = connection issue
+    const failType = duration < 100 ? "CONN_FAIL" : "TIMEOUT";
     console.log(`${failType} [${vus} VUs] ${duration.toFixed(0)}ms - status=${res.status} error="${res.error || 'none'}" word="${word}"`);
   } else if (duration > SLOW_LOG_MS) {
-    // Log slow but successful queries
     console.log(`SLOW [${vus} VUs] ${duration.toFixed(0)}ms - word="${word}"`);
   }
   
-  // Parse response and extract Solr's QTime
   let qtime = 0;
   let numFound = 0;
   
@@ -196,16 +169,14 @@ export default function () {
       qtime = body.responseHeader?.QTime || 0;
       numFound = body.response?.numFound || 0;
       
-      // Record Solr's self-reported metrics
       solrQTime.add(qtime);
       solrNumFound.add(numFound);
       
-      // Count slow queries by Solr's measure
       if (qtime > 100) solrQTimeOver100.add(1);
       if (qtime > 500) solrQTimeOver500.add(1);
       if (qtime > 1000) solrQTimeOver1000.add(1);
     } catch (e) {
-      // Parse error
+      // Parse error - ignore
     }
   }
   
@@ -224,16 +195,20 @@ export default function () {
     "response < 2000ms": (r) => r.timings.duration < 2000,
   });
 
-  // Fixed 1-second pacing: N VUs = N queries/second
   sleep(1);
 }
 
-// Stats collector function - runs independently
 export function collectStats() {
+  // Check if main test is still running (has active VUs)
+  const mainTestVUs = exec.instance.vusActive;
+  if (mainTestVUs <= 1) {
+    // Only stats_collector VU remains, main test has ended
+    return;
+  }
+  
   sleep(STATS_INTERVAL);
   
-  const currentVUs = exec.scenario.activeVUs || "?";
-  solr.collectSolrMetrics(SOLR_URL, SOLR_CORE, headers, `VUs: ~${currentVUs}`);
+  solr.collectSolrMetrics(SOLR_URL, SOLR_CORE, headers, `VUs: ~${mainTestVUs}`);
 }
 
 export function teardown() {
@@ -242,7 +217,6 @@ export function teardown() {
   console.log(`========================================`);
   solr.collectSolrMetrics(SOLR_URL, SOLR_CORE, headers, "FINAL");
   
-  // Capture system info NOW while there may still be load
   console.log(`Capturing Solr system info...`);
   __finalSolrSystemInfo = solr.fetchSolrSystemInfo(SOLR_URL, headers);
   if (__finalSolrSystemInfo) {
@@ -251,18 +225,14 @@ export function teardown() {
   }
 }
 
-// Handle summary - export results to JSON file (runs even on threshold abort)
 export function handleSummary(data) {
   const m = data.metrics;
   const abortReason = reporting.getAbortReason(data);
   const { totalRequests, testDuration, rps } = reporting.calculateDerivedMetrics(data);
   
-  // Use system info captured in teardown (while under load), fallback to fetching now
   const solrSystemInfo = __finalSolrSystemInfo || solr.fetchSolrSystemInfo(SOLR_URL, headers);
 
-  // Build clean, focused summary
   const summary = {
-    // ==================== TEST SETTINGS ====================
     metadata: {
       testScript: "solr_http.js",
       testNumber: TEST_NUMBER,
@@ -290,7 +260,6 @@ export function handleSummary(data) {
       httpReqFailed: `rate<${(MAX_FAIL_CON_RATE * 100).toFixed(0)}%`,
       solrQtime: `p(${THRESHOLD_PERCENTILE})<${ABORT_MS}ms`,
     },
-    // ==================== TEST RESULTS ====================
     result: {
       peakVUs: __peakVUs || m.vus?.values?.max || 0,
       configuredMaxVUs: MAX_VUS,
@@ -314,7 +283,6 @@ export function handleSummary(data) {
       avg_results_found: m.solr_num_found?.values?.avg?.toFixed(0) || null,
     },
     checks: reporting.extractChecks(data),
-    // ==================== SYSTEM INFORMATION ====================
     solrSystem: solrSystemInfo,
   };
 

@@ -1,80 +1,150 @@
-# Koha Stress Tester
+# Stress Testing Suite
 
-This repository contains k6 scripts for stress testing [Koha](https://koha-community.org/) and [Aspen Discovery](https://aspendiscovery.org/).
+# NOT READY FOR PUBLIC
 
-## Installation
+Load testing scripts for [Koha ILS](https://koha-community.org/), [Aspen Discovery](https://aspendiscovery.org/), and Solr using [k6](https://k6.io/).
 
-You need [k6](https://k6.io/) installed to run these tests.
+## Available Tests
 
-### Mac
-Using Homebrew:
+| Script             | Type    | Run With     | Description                             |
+| ------------------ | ------- | ------------ | --------------------------------------- |
+| `aspen_http.js`    | HTTP    | Docker or k6 | High-volume Aspen Discovery stress test |
+| `solr_http.js`     | HTTP    | Docker or k6 | Direct Solr query stress test           |
+| `aspen_browser.js` | Browser | k6 only      | Aspen Discovery with real browser       |
+| `koha.js`          | Browser | k6 only      | Koha ILS staff interface (template)     |
+
+**HTTP tests** are the primary focus - they can simulate hundreds of concurrent users and run in Docker.  
+**Browser tests** require the k6 binary installed locally (not Docker).
+
+> **WARNING:** Do not run these tests blindly. Always review and configure the `.env` file before running. These scripts can generate significant load on target systems - ensure you have permission to test the target and understand the configured VU counts and durations.
+
+## Quick Start (Docker) - HTTP Tests
+
+1. **Copy a test profile:**
+
+   ```bash
+   # Pick a profile from env-templates/
+   cp env-templates/smoke.env .env        # Quick sanity check (~2 min)
+   cp env-templates/baseline.env .env     # Establish normal metrics (~15 min)
+   cp env-templates/saturation.env .env   # Find breaking point (~25 min)
+   cp env-templates/soak.env .env         # Extended stability test (2-4 hours)
+   cp env-templates/firestarter.env .env  # Aggressive spike/DoS sim (~10 min)
+
+   # Or use the full reference template:
+   cp env-template .env
+   ```
+
+2. **Configure `.env`** - Set your UID/GID and target URLs:
+
+   ```bash
+   # Your user/group IDs (run: id -u and id -g)
+   UID=1000
+   GID=1000
+
+   # Target URLs and credentials - CONFIGURE THESE
+   BASE_URL=https://your-aspen-instance.org
+   HOST_HEADER=your-aspen-instance.org  # Comment out if not needed
+
+   SOLR_URL=http://your-solr-server:8983
+   SOLR_CORE=grouped_works
+   ```
+
+3. **Run:**
+
+   ```bash
+   docker compose up
+   ```
+
+## Running with k6 Binary
+
+Install k6: <https://k6.io/docs/get-started/installation/>
+
+### HTTP Tests
+
 ```bash
-brew install k6
+# Load .env and run
+env $(grep -v '^#' .env | xargs) k6 run benchmarks/aspen_http.js
+
+# Or pass variables directly
+k6 run -e BASE_URL=https://my-catalog.org -e MAX_VUS=100 benchmarks/aspen_http.js
 ```
 
-### Linux
-Debian/Ubuntu:
-```bash
-sudo gpg -k
-sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491B6C8DA84
-echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
-sudo apt-get update
-sudo apt-get install k6
-```
+### Browser Tests (k6 Binary Only)
 
-## Aspen Discovery Stress Test
+Browser tests require the k6 binary and Chromium installed on your system - they do not work in Docker.
 
-The `benchmarks/aspen.js` script simulates user traffic on an Aspen Discovery interface. It searches for random words from `words_alpha.txt`, clicks on results, and navigates back.
-
-### Usage
+> **WARNING:** Each VU spawns its own browser window. Running with `VUS=10` in visible mode will open 10 browser windows simultaneously. Start with `VUS=1` when testing, especially in non-headless mode.
 
 ```bash
-k6 run benchmarks/aspen.js
+# Headless (default) - safe to run with higher VUS
+k6 run -e BASE_URL=https://your-instance.org -e VUS=1 -e ITERATIONS=2 benchmarks/aspen_browser.js
+
+# Visible browser window - keep VUS low! (1 equals 1 browser window)
+K6_BROWSER_HEADLESS=false k6 run -e BASE_URL=https://your-instance.org -e RESULTS_TO_CLICK=2 -e VUS=1 -e ITERATIONS=2 benchmarks/aspen_browser.js
 ```
 
-### Environment Variables
-
-You can configure the test using the following environment variables:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `URL` | The base URL of the Aspen Discovery instance. | `http://aspen-discovery.localhost` |
-| `RESULTS_TO_CLICK` | The number of search results to interact with per search. | `5` |
-| `VUS` | The number of Virtual Users to simulate. | `1` |
-| `ITERATIONS` | The number of iterations to run per VU. | `1` |
-
-**Example:**
-```bash
-k6 run -e URL=https://my-aspen-catalog.org -e RESULTS_TO_CLICK=3 benchmarks/aspen.js
-```
-
-## Koha Stress Test
-
-The `benchmarks/koha.js` script simulates staff activity on the Koha staff interface and OPAC searches. It performs the following actions:
-1. Logs in to the staff interface.
-2. Creates a stub patron, biblio, and item via the API.
-3. Checks the item in, checks it out to the patron, and checks it in again.
-4. Performs a search on the OPAC.
-5. Deletes the created test data.
-
-### Usage
+Or load from `.env`:
 
 ```bash
-k6 run benchmarks/koha.js
+env $(grep -v '^#' .env | xargs) k6 run benchmarks/aspen_browser.js
 ```
 
-### Environment Variables
+## Test Profiles
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `STAFF_URL` | The URL of the Koha staff interface. | `http://kohadev-intra.localhost` |
-| `OPAC_URL` | The URL of the Koha OPAC. | `http://kohadev.localhost` |
-| `STAFF_USER` | The username for the staff interface login. | `koha` |
-| `STAFF_PASS` | The password for the staff interface login. | `koha` |
-| `VUS` | The number of Virtual Users to simulate. | `1` |
-| `ITERATIONS` | The number of iterations to run per VU. | `1` |
+Pre-configured templates in `env-templates/` for common scenarios:
 
-**Example:**
-```bash
-k6 run -e STAFF_URL=http://staff.mylibrary.org -e STAFF_USER=admin -e STAFF_PASS=secret benchmarks/koha.js
+| Profile           | Duration  | Max VUs | Purpose                                             |
+| ----------------- | --------- | ------- | --------------------------------------------------- |
+| `smoke.env`       | ~2 min    | 10      | Quick sanity check - verify system responds         |
+| `baseline.env`    | ~15 min   | 15      | Establish normal performance metrics                |
+| `saturation.env`  | ~25 min   | 150     | Gradual ramp to find breaking point                 |
+| `soak.env`        | 2-4 hours | 50      | Extended run to find memory leaks, stability issues |
+| `firestarter.env` | ~10 min   | 300     | Aggressive spike - DoS simulation                   |
+
+### Recommended Order
+
+1. **Smoke** - Verify connectivity and basic function
+2. **Baseline** - Capture normal response times
+3. **Saturation** - Find where performance degrades
+4. **Soak** - Confirm stability under sustained load
+
+## Configuration
+
+All configuration is in `env-template`. Copy to `.env` and customize.
+
+The most important settings are at the top:
+
+- **UID/GID** - Required for Docker
+- **Target URLs & Credentials** - Configure these first
+
+See `env-template` for all load test options.
+
+## Output
+
+Results are saved to `./output/` as JSON:
+
 ```
+{script}-{number}-{date}-{time}.json
+```
+
+## Troubleshooting
+
+### Requests not hitting the expected domain
+
+Comment out the `HOST_HEADER` variable in your `.env` file. The `HOST_HEADER` is only needed when testing via localhost with a custom Host header.
+
+### 403 Forbidden / Cloudflare blocking requests
+
+If the target site has Cloudflare or similar protection, automated requests may be blocked. To bypass this:
+
+1. Set up a direct route to the server (e.g., via Tailscale, VPN, or internal network)
+2. Add an entry to your `/etc/hosts` file mapping the domain to the direct IP:
+
+   ```
+   # Example: Map domain to Tailscale IP
+   100.x.x.x  your-aspen-instance.aspendiscovery.org
+   ```
+
+3. Set `BASE_URL` to use the domain name (which now resolves to your direct route)
+
+This allows you to test the actual domain while bypassing Cloudflare's bot protection.

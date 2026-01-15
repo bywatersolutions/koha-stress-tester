@@ -1,6 +1,8 @@
 services:
   k6:
     image: grafana/k6:${K6_IMAGE_TAG}
+    # For HTTP-only tests, you can use: user: "${UID}:${GID}"
+    # For browser tests, comment out the user line (runs as root)
     user: "${UID}:${GID}"
     network_mode: host
     env_file:
