@@ -57,13 +57,19 @@ MAX_VUS=300
 VU_STEP=10
 RAMP_TIME=5s
 HOLD_TIME=5s
-# Abort test when p(THRESHOLD_PERCENTILE) response time exceeds threshold
+# Abort test when p(THRESHOLD_PERCENTILE) response time exceeds ABORT threshold
 # Lower percentile = more tolerant of slow outliers (e.g., 90 = allow 10% slow)
 # Higher percentile = stricter (e.g., 99 = only allow 1% slow)
 THRESHOLD_PERCENTILE=98
-ASPEN_THRESHOLD_MS=8000
+ASPEN_ABORT_MS=12000
+SOLR_ABORT_MS=2000
 ASPEN_REQUEST_TIMEOUT=10s
-SOLR_THRESHOLD_MS=2000
+
+# MAX_FAIL_CON_RATE: Maximum allowed connection/request failure rate (0.0-1.0)
+# Test aborts if failure rate exceeds this threshold
+# Examples: 0.05 = 5% failures allowed, 0.01 = 1% failures allowed
+ASPEN_MAX_FAIL_CON_RATE=0.05
+SOLR_MAX_FAIL_CON_RATE=0.05
 
 # Console logging: log individual slow requests above this threshold (ms)
 ASPEN_SLOW_LOG_MS=6000

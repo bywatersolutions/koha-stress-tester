@@ -17,8 +17,9 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
-const THRESHOLD_MS = parseInt(__ENV.ASPEN_THRESHOLD_MS) || 12000; // Response time threshold for test abort (ms)
+const ABORT_MS = parseInt(__ENV.ASPEN_ABORT_MS) || 12000; // Response time threshold - abort test when p(X) exceeds this
 const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98; // Percentile to check (e.g., 98 = p(98))
+const MAX_FAIL_CON_RATE = parseFloat(__ENV.ASPEN_MAX_FAIL_CON_RATE) || 0.05; // Max failure/connection rate before abort (0.05 = 5%)
 const REQUEST_TIMEOUT = __ENV.ASPEN_REQUEST_TIMEOUT || "10s"; // Request timeout
 const REQUEST_TIMEOUT_MS = parseInt(REQUEST_TIMEOUT) * 1000; // Convert to ms for comparison
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || ""; // Output file path for JSON results
@@ -94,7 +95,7 @@ function logRequestStatus(res, label, vus) {
 
 // ------------------------------------------------------------
 // Generate stages dynamically: ramp by VU_STEP, hold, repeat until MAX_VUS
-// Aborts when p(THRESHOLD_PERCENTILE) response time exceeds THRESHOLD_MS
+// Aborts when p(THRESHOLD_PERCENTILE) response time exceeds ABORT_MS
 // ------------------------------------------------------------
 function generateStages() {
   const stages = [];
@@ -114,7 +115,14 @@ export const options = {
   thresholds: {
     http_req_duration: [
       {
-        threshold: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}`,
+        threshold: `p(${THRESHOLD_PERCENTILE})<${ABORT_MS}`,
+        abortOnFail: true,
+        delayAbortEval: "30s",
+      },
+    ],
+    http_req_failed: [
+      {
+        threshold: `rate<${MAX_FAIL_CON_RATE}`,
         abortOnFail: true,
         delayAbortEval: "30s",
       },
@@ -127,7 +135,8 @@ export function setup() {
   console.log(`HOST_HEADER: ${HOST_HEADER}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
-  console.log(`THRESHOLD_MS: ${THRESHOLD_MS} (abort test when p(${THRESHOLD_PERCENTILE}) exceeds this)`);
+  console.log(`ABORT_MS: ${ABORT_MS} (abort test when p(${THRESHOLD_PERCENTILE}) exceeds this)`);
+  console.log(`MAX_FAIL_CON_RATE: ${(MAX_FAIL_CON_RATE * 100).toFixed(0)}% (abort test when failure rate exceeds this)`);
   console.log(`SLOW_LOG_MS: ${SLOW_LOG_MS} (log slow requests to console)`);
   console.log(`REQUEST_TIMEOUT: ${REQUEST_TIMEOUT}`);
   const thinkTimeStatus = THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s fixed` : "random");
@@ -245,15 +254,21 @@ export function handleSummary(data) {
       baseUrl: BASE_URL,
       hostHeader: HOST_HEADER,
       resultsToClick: RESULTS_TO_CLICK,
+      thinkTime: THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s` : "random"),
       maxVUs: MAX_VUS,
       vuStep: VU_STEP,
       rampTime: RAMP_TIME,
       holdTime: HOLD_TIME,
+      abortMs: ABORT_MS,
+      thresholdPercentile: THRESHOLD_PERCENTILE,
+      maxFailRate: `${(MAX_FAIL_CON_RATE * 100).toFixed(0)}%`,
+      slowLogMs: SLOW_LOG_MS,
       requestTimeout: REQUEST_TIMEOUT,
       solrUrl: SOLR_URL || "(not configured)",
     },
     thresholds: {
-      httpReqDuration: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}ms`,
+      httpReqDuration: `p(${THRESHOLD_PERCENTILE})<${ABORT_MS}ms`,
+      httpReqFailed: `rate<${(MAX_FAIL_CON_RATE * 100).toFixed(0)}%`,
     },
     // ==================== TEST RESULTS ====================
     result: {

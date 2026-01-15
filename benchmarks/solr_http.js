@@ -18,7 +18,8 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
-const THRESHOLD_MS = parseInt(__ENV.SOLR_THRESHOLD_MS) || 2000; // Response time threshold for test abort (ms)
+const ABORT_MS = parseInt(__ENV.SOLR_ABORT_MS) || 2000; // Response time threshold - abort test when p(X) exceeds this
+const MAX_FAIL_CON_RATE = parseFloat(__ENV.SOLR_MAX_FAIL_CON_RATE) || 0.05; // Max failure/connection rate before abort (0.05 = 5%)
 const SLOW_LOG_MS = parseInt(__ENV.SOLR_SLOW_LOG_MS) || 2000; // Threshold for logging slow requests to console (ms)
 const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98; // Percentile to check (e.g., 98 = p(98))
 const STATS_INTERVAL = parseInt(__ENV.STATS_INTERVAL) || 10; // seconds between stats collection
@@ -107,12 +108,19 @@ export const options = {
   thresholds: {
     http_req_duration: [
       {
-        threshold: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}`,
+        threshold: `p(${THRESHOLD_PERCENTILE})<${ABORT_MS}`,
         abortOnFail: true,
         delayAbortEval: HOLD_ON_FAIL,
       },
     ],
-    solr_qtime: [`p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}`],
+    http_req_failed: [
+      {
+        threshold: `rate<${MAX_FAIL_CON_RATE}`,
+        abortOnFail: true,
+        delayAbortEval: HOLD_ON_FAIL,
+      },
+    ],
+    solr_qtime: [`p(${THRESHOLD_PERCENTILE})<${ABORT_MS}`],
   },
 };
 
@@ -125,7 +133,8 @@ export function setup() {
   console.log(`SOLR_USER: ${SOLR_USER ? "(set)" : "(not set)"}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
-  console.log(`THRESHOLD_MS: ${THRESHOLD_MS} (abort test when p(${THRESHOLD_PERCENTILE}) exceeds this)`);
+  console.log(`ABORT_MS: ${ABORT_MS} (abort test when p(${THRESHOLD_PERCENTILE}) exceeds this)`);
+  console.log(`MAX_FAIL_CON_RATE: ${(MAX_FAIL_CON_RATE * 100).toFixed(0)}% (abort test when failure rate exceeds this)`);
   console.log(`SLOW_LOG_MS: ${SLOW_LOG_MS} (log slow requests to console)`);
   console.log(`STATS_INTERVAL: ${STATS_INTERVAL}s`);
   console.log(`HARD_TIMEOUT: ${HARD_TIMEOUT} (absolute max duration)`);
@@ -267,14 +276,19 @@ export function handleSummary(data) {
       vuStep: VU_STEP,
       rampTime: RAMP_TIME,
       holdTime: HOLD_TIME,
+      abortMs: ABORT_MS,
+      thresholdPercentile: THRESHOLD_PERCENTILE,
+      maxFailRate: `${(MAX_FAIL_CON_RATE * 100).toFixed(0)}%`,
+      slowLogMs: SLOW_LOG_MS,
       statsInterval: STATS_INTERVAL,
       hardTimeout: HARD_TIMEOUT,
       holdOnFail: HOLD_ON_FAIL,
-      requestTimeout: "6s",
+      requestTimeout: "30s",
     },
     thresholds: {
-      httpReqDuration: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}ms`,
-      solrQtime: `p(${THRESHOLD_PERCENTILE})<${THRESHOLD_MS}ms`,
+      httpReqDuration: `p(${THRESHOLD_PERCENTILE})<${ABORT_MS}ms`,
+      httpReqFailed: `rate<${(MAX_FAIL_CON_RATE * 100).toFixed(0)}%`,
+      solrQtime: `p(${THRESHOLD_PERCENTILE})<${ABORT_MS}ms`,
     },
     // ==================== TEST RESULTS ====================
     result: {
