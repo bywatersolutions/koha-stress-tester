@@ -79,6 +79,7 @@ export const options = {
       executor: "ramping-vus",
       stages: generateStages(),
       gracefulRampDown: "10s",
+      gracefulStop: "10s",  // Allow iterations to complete cleanly
     },
     stats_collector: {
       executor: "constant-vus",

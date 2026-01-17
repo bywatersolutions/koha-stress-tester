@@ -89,6 +89,7 @@ function generateStages() {
 
 export const options = {
   insecureSkipTLSVerify: true,
+  gracefulStop: "10s",  // Allow iterations to complete cleanly
   stages: generateStages(),
   summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", `p(${THRESHOLD_PERCENTILE})`],
   thresholds: {

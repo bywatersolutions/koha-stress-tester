@@ -20,7 +20,7 @@ spec:
         - name: k6
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["k6", "run", "/scripts/script.js"]
+          command: ["/bin/sh", "-c", "k6 run /scripts/script.js; sleep 10"]
           env:
             - name: SOLR_URL
               value: "{{ .Values.solr.url }}"

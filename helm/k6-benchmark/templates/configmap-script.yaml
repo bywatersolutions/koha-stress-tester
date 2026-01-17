@@ -13,6 +13,7 @@ data:
     import { SharedArray } from "k6/data";
     import { Trend, Counter } from "k6/metrics";
     import exec from "k6/execution";
+    import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.1/index.js";
 
     // Configuration from environment (set via Helm values or secrets)
     const SOLR_URL = __ENV.SOLR_URL || "";
@@ -32,6 +33,23 @@ data:
 
     // Custom metrics
     const solrQTime = new Trend("solr_qtime", true);
+
+    // Store system info for final report
+    let __solrSystemInfo = null;
+
+    // Fetch Solr system info
+    function fetchSolrSystemInfo() {
+      try {
+        const sysInfoUrl = `${SOLR_URL}/solr/admin/info/system?wt=json`;
+        const res = http.get(sysInfoUrl, { headers, timeout: "10s" });
+        if (res.status === 200) {
+          return JSON.parse(res.body);
+        }
+      } catch (e) {
+        return { error: `Could not fetch: ${e.message}` };
+      }
+      return null;
+    }
 
     // Auth headers if needed
     const headers = {};
@@ -81,6 +99,15 @@ data:
       console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
       console.log(`Word list: ${words.length} words`);
       console.log(`Aborts when p(95) response time exceeds 2s`);
+      
+      // Fetch and display Solr system info
+      const sysInfo = fetchSolrSystemInfo();
+      if (sysInfo && !sysInfo.error) {
+        console.log(`Solr version: ${sysInfo.lucene?.["solr-spec-version"] || "N/A"}`);
+        console.log(`JVM memory max: ${sysInfo.jvm?.memory?.max || "N/A"}`);
+        console.log(`Processors: ${sysInfo.jvm?.processors || "N/A"}`);
+        console.log(`Mode: ${sysInfo.mode || "N/A"}`);
+      }
       console.log(`========================================`);
     }
 
@@ -121,5 +148,37 @@ data:
       console.log(`========================================`);
       console.log(`TEST COMPLETE`);
       console.log(`========================================`);
+      
+      // Capture final Solr system info
+      console.log(`Capturing Solr system info...`);
+      __solrSystemInfo = fetchSolrSystemInfo();
+      if (__solrSystemInfo && !__solrSystemInfo.error) {
+        console.log(`  Load average: ${__solrSystemInfo.system?.systemLoadAverage || "N/A"}`);
+        console.log(`  Memory used: ${__solrSystemInfo.jvm?.memory?.used || "N/A"}`);
+      }
+    }
+
+    export function handleSummary(data) {
+      // Fetch system info if not captured in teardown
+      const solrSystemInfo = __solrSystemInfo || fetchSolrSystemInfo();
+      
+      const summary = {
+        timestamp: new Date().toISOString(),
+        config: {
+          solr_url: SOLR_URL,
+          solr_core: SOLR_CORE,
+          max_vus: MAX_VUS,
+          vu_step: VU_STEP,
+          ramp_time: RAMP_TIME,
+          hold_time: HOLD_TIME,
+        },
+        metrics: data.metrics,
+        solrSystem: solrSystemInfo,
+      };
+      // Write JSON to file (no escaping issues) and text summary to stdout
+      return {
+        stdout: textSummary(data, { indent: " ", enableColors: false }),
+        "/tmp/summary.json": JSON.stringify(summary, null, 2),
+      };
     }
 

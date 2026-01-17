@@ -26,6 +26,7 @@ export const options = {
       executor: "shared-iterations",
       vus: __ENV.VUS || 1,
       iterations: __ENV.ITERATIONS || 1,
+      gracefulStop: "10s",  // Allow browser sessions to complete cleanly
       options: {
         browser: {
           type: "chromium",

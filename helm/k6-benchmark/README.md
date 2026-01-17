@@ -1,6 +1,6 @@
 # K6 Benchmark Helm Chart
 
-Run k6 load tests inside your Kubernetes cluster for accurate benchmarking without network bottlenecks.
+Run `solr_http.js` load tests inside your Kubernetes cluster for accurate benchmarking without network bottlenecks.
 
 ## Prerequisites
 
@@ -67,17 +67,26 @@ The script uses these variables from `.env`:
 
 | Variable | Description |
 |----------|-------------|
-| `SOLR_URL` | Solr service URL (required) |
+| `SOLR_URL` | Solr service URL (required) - use internal K8s service URL |
 | `SOLR_CORE` | Solr collection name (required) |
+| `K6_NAMESPACE` | Namespace to deploy into (default: `k6-tests`) |
 | `SOLR_USER` | Solr username |
 | `SOLR_PASS` | Solr password (if not using secret) |
 | `SOLR_SECRET` | K8s secret name containing password |
+| `SOLR_SECRET_KEY` | Key in secret for password (default: `password`) |
 | `MAX_VUS` | Maximum virtual users |
 | `VU_STEP` | VU increment per stage |
 | `RAMP_TIME` | Duration of ramp phase |
 | `HOLD_TIME` | Duration of hold phase |
 
 If `SOLR_SECRET` is set, the password is read from the Kubernetes secret. Username always comes from `SOLR_USER`.
+
+## Output
+
+Results are saved to `../output/helm-solr-{number}-{timestamp}.json` and include:
+- Test configuration
+- All k6 metrics
+- Solr system info (version, JVM memory, load average)
 
 ### Manual run
 

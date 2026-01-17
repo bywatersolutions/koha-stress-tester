@@ -38,9 +38,12 @@ SOLR_URL=http://localhost:8983
 SOLR_CORE=grouped_works
 SOLR_USER=
 SOLR_PASS=
-# For Helm/K8s: name of secret containing password
-# If set, SOLR_PASS is read from the secret instead
+# For Helm/K8s:
+# K6_NAMESPACE: deploy to same namespace as Solr to access existing secrets
+#K6_NAMESPACE=solr-cloud
+# SOLR_SECRET: name of secret containing password (must exist in K6_NAMESPACE)
 #SOLR_SECRET=solr-credentials
+#SOLR_SECRET_KEY=password
 
 # Koha (koha.js)
 STAFF_URL=https://kohadev-intra.localhost

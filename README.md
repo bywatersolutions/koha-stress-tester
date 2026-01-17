@@ -1,7 +1,5 @@
 # Stress Testing Suite
 
-# NOT READY FOR PUBLIC
-
 Load testing scripts for [Koha ILS](https://koha-community.org/), [Aspen Discovery](https://aspendiscovery.org/), and Solr using [k6](https://k6.io/).
 
 ## What This Does
@@ -9,6 +7,7 @@ Load testing scripts for [Koha ILS](https://koha-community.org/), [Aspen Discove
 This tool simulates many users hitting your catalog simultaneously to measure performance and find breaking points. It sends HTTP requests (or controls real browsers) to your system and records response times, error rates, and throughput.
 
 **Use cases:**
+
 - Verify a system can handle expected traffic before go-live
 - Find the point where response times degrade unacceptably
 - Detect memory leaks or stability issues under sustained load
@@ -16,14 +15,14 @@ This tool simulates many users hitting your catalog simultaneously to measure pe
 
 ### Key Configuration Values
 
-| Variable | What It Controls |
-| -------- | ---------------- |
-| `MAX_VUS` | Maximum concurrent virtual users (simultaneous connections). Start low (10-20), increase gradually. |
-| `RAMP_TIME` | How long to ramp from 0 to MAX_VUS (e.g., `2m` = 2 minutes). Gradual ramps reveal when performance degrades. |
-| `HOLD_TIME` | Duration to maintain peak load after ramping (e.g., `5m` = 5 minutes at MAX_VUS). |
-| `ABORT_MS` | Response time threshold in milliseconds. If p95 response time exceeds this, the test aborts (system overloaded). |
-| `MAX_FAIL_CON_RATE` | Maximum consecutive failure rate (e.g., `0.1` = 10%). Aborts if exceeded. |
-| `THINK_TIME` | Pause between actions per user (seconds). Use `off` to disable, blank for random 1-3s, or a number like `2`. |
+| Variable            | What It Controls                                                                                                 |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `MAX_VUS`           | Maximum concurrent virtual users (simultaneous connections). Start low (10-20), increase gradually.              |
+| `RAMP_TIME`         | How long to ramp from 0 to MAX_VUS (e.g., `2m` = 2 minutes). Gradual ramps reveal when performance degrades.     |
+| `HOLD_TIME`         | Duration to maintain peak load after ramping (e.g., `5m` = 5 minutes at MAX_VUS).                                |
+| `ABORT_MS`          | Response time threshold in milliseconds. If p95 response time exceeds this, the test aborts (system overloaded). |
+| `MAX_FAIL_CON_RATE` | Maximum consecutive failure rate (e.g., `0.1` = 10%). Aborts if exceeded.                                        |
+| `THINK_TIME`        | Pause between actions per user (seconds). Use `off` to disable, blank for random 1-3s, or a number like `2`.     |
 
 **Example:** `MAX_VUS=100` with `RAMP_TIME=5m` and `HOLD_TIME=10m` means: gradually add users over 5 minutes until you have 100 concurrent users, then maintain that load for 10 minutes.
 
@@ -144,26 +143,73 @@ See `env-template` for all load test options.
 
 ## Output
 
-Results are saved to `./output/` as JSON:
+All tests save JSON results to `./output/`:
 
 ```
-{script}-{number}-{date}-{time}.json
+./output/
+├── aspen-001-20260117-1430.json       # aspen_http.js
+├── aspen-browser-001-20260117-1435.json  # aspen_browser.js
+├── solr-001-20260117-1440.json        # solr_http.js
+└── helm-solr-001-20260117-1445.json   # helm/run-test.sh
 ```
+
+Each run generates a new numbered JSON file containing:
+- Test configuration
+- All k6 metrics (response times, throughput, errors)
+- Check results
+- Solr system info (if applicable)
 
 ## Kubernetes / Helm
 
-For running tests inside a Kubernetes cluster (closer to your Solr instances, no network bottlenecks).
+For running `solr_http.js` inside a Kubernetes cluster (closer to your Solr instances, no network bottlenecks).
 
-The script reads from your `.env` file - same configuration as Docker:
+### Setup
 
-```bash
-# 1. Configure .env with SOLR_URL, SOLR_CORE, etc.
-cp env-template .env
-vim .env
+1. **Configure `.env`** with your Solr settings:
 
-# 2. Run
-./helm/run-test.sh
-```
+   ```bash
+   cp env-template .env
+   ```
+
+   Key variables for Helm:
+
+   ```bash
+   # Required
+   SOLR_URL=http://solr-service.solr-namespace.svc.cluster.local:8983
+   SOLR_CORE=grouped_works
+
+   # Optional: Deploy to same namespace as Solr to access existing secrets
+   K6_NAMESPACE=solr-cloud
+
+   # Optional: Use K8s secret for password (must exist in K6_NAMESPACE)
+   SOLR_USER=admin
+   SOLR_SECRET=solr-credentials
+   SOLR_SECRET_KEY=password
+
+   # Test parameters
+   MAX_VUS=100
+   VU_STEP=10
+   RAMP_TIME=5s
+   HOLD_TIME=5s
+   ```
+
+2. **Run:**
+
+   ```bash
+   ./helm/run-test.sh
+   ```
+
+   The script will:
+   - Deploy k6 as a Kubernetes Job
+   - Stream logs in real-time
+   - Copy JSON results to `./output/helm-solr-{number}-{date}.json`
+   - Clean up on completion or Ctrl+C
+
+### Notes
+
+- Use internal K8s service URLs for `SOLR_URL` (not external hostnames)
+- Set `K6_NAMESPACE` to your Solr namespace to access existing secrets
+- Results include Solr system info (version, memory, load average)
 
 See `helm/k6-benchmark/README.md` for full configuration options.
 
