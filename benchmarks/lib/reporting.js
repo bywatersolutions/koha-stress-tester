@@ -176,5 +176,7 @@ export function generateOutputPath(scriptName, testNumber) {
   const now = new Date();
   const shortDate = now.toISOString().slice(0, 10).replace(/-/g, "");
   const time = now.toISOString().slice(11, 16).replace(/:/g, "");
-  return `/output/${scriptName}-${testNumber}-${shortDate}-${time}.json`;
+  // Use OUTPUT_DIR env var, or /output (Docker) if it exists, otherwise ./output (local)
+  const outputDir = __ENV.OUTPUT_DIR || "/output";
+  return `${outputDir}/${scriptName}-${testNumber}-${shortDate}-${time}.json`;
 }

@@ -15,6 +15,16 @@ const SOLR_URL = __ENV.SOLR_URL || "https://solr.example.com:8983";
 const SOLR_CORE = __ENV.SOLR_CORE || "grouped_works";
 const SOLR_USER = __ENV.SOLR_USER || "";
 const SOLR_PASS = __ENV.SOLR_PASS || "";
+// SOLR_HOST_IP: Map the hostname in SOLR_URL to this IP address
+// (bypasses DNS - use for Tailscale: SOLR_URL stays as domain, SOLR_HOST_IP=100.x.x.x)
+const SOLR_HOST_IP = __ENV.SOLR_HOST_IP || "";
+
+// Extract hostname from SOLR_URL for hosts mapping
+function getHostFromUrl(url) {
+  const match = url.match(/^https?:\/\/([^:/]+)/);
+  return match ? match[1] : null;
+}
+const SOLR_HOSTNAME = getHostFromUrl(SOLR_URL);
 const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
@@ -68,11 +78,17 @@ function getTotalDuration() {
   return `${totalSecs}s`;
 }
 
+// Build hosts mapping if SOLR_HOST_IP is set (for Tailscale/custom DNS)
+const hostsMapping = SOLR_HOST_IP && SOLR_HOSTNAME 
+  ? { [SOLR_HOSTNAME]: SOLR_HOST_IP }
+  : {};
+
 export const options = {
   insecureSkipTLSVerify: true,
   batch: 10,
   batchPerHost: 10,
   dns: { ttl: "1m" },
+  hosts: hostsMapping,
   summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", `p(${THRESHOLD_PERCENTILE})`],
   scenarios: {
     load_test: {
@@ -113,6 +129,9 @@ export function setup() {
   console.log(`SOLR BENCHMARK TEST`);
   console.log(`========================================`);
   console.log(`SOLR_URL: ${SOLR_URL}`);
+  if (SOLR_HOST_IP) {
+    console.log(`SOLR_HOST_IP: ${SOLR_HOSTNAME} -> ${SOLR_HOST_IP}`);
+  }
   console.log(`SOLR_CORE: ${SOLR_CORE}`);
   console.log(`SOLR_USER: ${SOLR_USER ? "(set)" : "(not set)"}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
