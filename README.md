@@ -81,7 +81,19 @@ This tool simulates many users hitting your catalog simultaneously to measure pe
 
 Install k6: <https://k6.io/docs/get-started/installation/>
 
-### HTTP Tests
+### Using run-with-env.sh (Recommended)
+
+The `bin/run-with-env.sh` script reads your `.env` file and passes all variables to k6 automatically:
+
+```bash
+# Configure .env first, then:
+./bin/run-with-env.sh                  # Runs the BENCH script specified in .env
+./bin/run-with-env.sh solr_http.js     # Override to run a specific script
+./bin/run-with-env.sh aspen_http.js
+./bin/run-with-env.sh aspen_browser.js
+```
+
+### Manual k6 Commands
 
 ```bash
 # Load .env and run
@@ -98,17 +110,14 @@ Browser tests require the k6 binary and Chromium installed on your system - they
 > **WARNING:** Each VU spawns its own browser window. Running with `VUS=10` in visible mode will open 10 browser windows simultaneously. Start with `VUS=1` when testing, especially in non-headless mode.
 
 ```bash
-# Headless (default) - safe to run with higher VUS
-k6 run -e BASE_URL=https://your-instance.org -e VUS=1 -e ITERATIONS=2 benchmarks/aspen_browser.js
+# Using run-with-env.sh (recommended)
+./bin/run-with-env.sh aspen_browser.js
 
-# Visible browser window - keep VUS low! (1 equals 1 browser window)
-K6_BROWSER_HEADLESS=false k6 run -e BASE_URL=https://your-instance.org -e RESULTS_TO_CLICK=2 -e VUS=1 -e ITERATIONS=2 benchmarks/aspen_browser.js
-```
+# Visible browser window (set K6_BROWSER_HEADLESS=false in .env)
+./bin/run-with-env.sh aspen_browser.js
 
-Or load from `.env`:
-
-```bash
-env $(grep -v '^#' .env | xargs) k6 run benchmarks/aspen_browser.js
+# Or manually:
+K6_BROWSER_HEADLESS=false k6 run -e BASE_URL=https://your-instance.org -e VUS=1 -e ITERATIONS=2 benchmarks/aspen_browser.js
 ```
 
 ## Test Profiles
@@ -234,3 +243,17 @@ If the target site has Cloudflare or similar protection, automated requests may 
 3. Set `BASE_URL` to use the domain name (which now resolves to your direct route)
 
 This allows you to test the actual domain while bypassing Cloudflare's bot protection.
+
+### Tailscale / MagicDNS "no such host" errors
+
+If curl works but k6 fails with `lookup ... no such host` for Tailscale hostnames, k6's Go-based DNS resolver isn't seeing Tailscale's MagicDNS.
+
+**Solution:** Set `SOLR_HOST_IP` to map the hostname to its IP:
+
+```bash
+# In .env:
+SOLR_URL=https://my-host.ts.net      # Keep the hostname for TLS
+SOLR_HOST_IP=100.64.0.5              # Get with: tailscale ip -4 my-host
+```
+
+This uses k6's built-in `hosts` option to bypass DNS while preserving correct TLS SNI.

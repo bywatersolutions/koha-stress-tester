@@ -38,6 +38,10 @@ SOLR_URL=http://localhost:8983
 SOLR_CORE=grouped_works
 SOLR_USER=
 SOLR_PASS=
+# SOLR_HOST_IP: Map hostname to IP (for Tailscale, VPNs, or custom DNS)
+# Set this if k6 can't resolve the SOLR_URL hostname
+# Get the IP with: tailscale ip -4 <hostname> or getent hosts <hostname>
+#SOLR_HOST_IP=
 # For Helm/K8s:
 # K6_NAMESPACE: deploy to same namespace as Solr to access existing secrets
 #K6_NAMESPACE=solr-cloud
