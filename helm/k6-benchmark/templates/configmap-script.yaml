@@ -14,11 +14,11 @@ data:
     import { Trend, Counter } from "k6/metrics";
     import exec from "k6/execution";
 
-    // Configuration from environment
-    const SOLR_URL = __ENV.SOLR_URL || "{{ .Values.solr.url }}";
-    const SOLR_CORE = __ENV.SOLR_CORE || "{{ .Values.solr.core }}";
-    const SOLR_USER = __ENV.SOLR_USER || "{{ .Values.solr.user }}";
-    const SOLR_PASS = __ENV.SOLR_PASS || "{{ .Values.solr.pass }}";
+    // Configuration from environment (set via Helm values or secrets)
+    const SOLR_URL = __ENV.SOLR_URL || "";
+    const SOLR_CORE = __ENV.SOLR_CORE || "";
+    const SOLR_USER = __ENV.SOLR_USER || "";
+    const SOLR_PASS = __ENV.SOLR_PASS || "";
     const MAX_VUS = parseInt(__ENV.MAX_VUS) || {{ .Values.test.maxVUs }};
     const VU_STEP = parseInt(__ENV.VU_STEP) || {{ .Values.test.vuStep }};
     const RAMP_TIME = __ENV.RAMP_TIME || "{{ .Values.test.rampTime }}";

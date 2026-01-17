@@ -28,8 +28,16 @@ spec:
               value: "{{ .Values.solr.core }}"
             - name: SOLR_USER
               value: "{{ .Values.solr.user }}"
+            {{- if .Values.solr.existingSecret }}
+            - name: SOLR_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.solr.existingSecret }}
+                  key: {{ .Values.solr.existingSecretKey }}
+            {{- else }}
             - name: SOLR_PASS
               value: "{{ .Values.solr.pass }}"
+            {{- end }}
             - name: MAX_VUS
               value: "{{ .Values.test.maxVUs }}"
             - name: VU_STEP

@@ -4,6 +4,29 @@
 
 Load testing scripts for [Koha ILS](https://koha-community.org/), [Aspen Discovery](https://aspendiscovery.org/), and Solr using [k6](https://k6.io/).
 
+## What This Does
+
+This tool simulates many users hitting your catalog simultaneously to measure performance and find breaking points. It sends HTTP requests (or controls real browsers) to your system and records response times, error rates, and throughput.
+
+**Use cases:**
+- Verify a system can handle expected traffic before go-live
+- Find the point where response times degrade unacceptably
+- Detect memory leaks or stability issues under sustained load
+- Benchmark before/after infrastructure changes
+
+### Key Configuration Values
+
+| Variable | What It Controls |
+| -------- | ---------------- |
+| `MAX_VUS` | Maximum concurrent virtual users (simultaneous connections). Start low (10-20), increase gradually. |
+| `RAMP_TIME` | How long to ramp from 0 to MAX_VUS (e.g., `2m` = 2 minutes). Gradual ramps reveal when performance degrades. |
+| `HOLD_TIME` | Duration to maintain peak load after ramping (e.g., `5m` = 5 minutes at MAX_VUS). |
+| `ABORT_MS` | Response time threshold in milliseconds. If p95 response time exceeds this, the test aborts (system overloaded). |
+| `MAX_FAIL_CON_RATE` | Maximum consecutive failure rate (e.g., `0.1` = 10%). Aborts if exceeded. |
+| `THINK_TIME` | Pause between actions per user (seconds). Use `off` to disable, blank for random 1-3s, or a number like `2`. |
+
+**Example:** `MAX_VUS=100` with `RAMP_TIME=5m` and `HOLD_TIME=10m` means: gradually add users over 5 minutes until you have 100 concurrent users, then maintain that load for 10 minutes.
+
 ## Available Tests
 
 | Script             | Type    | Run With     | Description                             |
@@ -126,6 +149,23 @@ Results are saved to `./output/` as JSON:
 ```
 {script}-{number}-{date}-{time}.json
 ```
+
+## Kubernetes / Helm
+
+For running tests inside a Kubernetes cluster (closer to your Solr instances, no network bottlenecks).
+
+The script reads from your `.env` file - same configuration as Docker:
+
+```bash
+# 1. Configure .env with SOLR_URL, SOLR_CORE, etc.
+cp env-template .env
+vim .env
+
+# 2. Run
+./helm/run-test.sh
+```
+
+See `helm/k6-benchmark/README.md` for full configuration options.
 
 ## Troubleshooting
 

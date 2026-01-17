@@ -9,11 +9,17 @@ image:
 # Solr connection settings
 solr:
   # Internal service URL (use FQDN for cross-namespace access)
-  url: "http://clevnet-solrcloud-solrcloud-common.solr-cloud.svc.cluster.local"
-  core: "grouped_works_v2"
-  # Leave empty if no auth required inside cluster
+  # Example: http://my-solr-service.solr-namespace.svc.cluster.local
+  url: ""
+  core: "grouped_works"
+  
+  # Credentials
   user: ""
   pass: ""
+  # For K8s: use a secret for the password (more secure)
+  # If existingSecret is set, password is read from the secret instead of pass
+  existingSecret: ""      # Name of existing secret containing password
+  existingSecretKey: "password"  # Key in secret for password
 
 # Test configuration
 test:
