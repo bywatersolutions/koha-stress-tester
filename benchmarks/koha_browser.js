@@ -42,6 +42,8 @@ if (__ENV.K6_BROWSER_HEADLESS === "false" || __ENV.HEADLESS === "false") {
 // ------------------------------------------------------------
 const STAFF_URL = __ENV.STAFF_URL || "http://kohadev-intra.localhost";
 const OPAC_URL = __ENV.OPAC_URL || "http://kohadev.localhost";
+const STAFF_HOST_HEADER = __ENV.STAFF_HOST_HEADER || "";
+const OPAC_HOST_HEADER = __ENV.OPAC_HOST_HEADER || "";
 const [STAFF_PROTOCOL, STAFF_HOST] = STAFF_URL.split("://");
 const STAFF_BASE_URL = `${STAFF_PROTOCOL}://${STAFF_HOST}`;
 const STAFF_USER = __ENV.STAFF_USER || "koha";
@@ -85,17 +87,28 @@ export function setup() {
   console.log("KOHA BROWSER BENCHMARK TEST");
   console.log("========================================");
   console.log(`STAFF_URL: ${STAFF_URL}`);
+  if (STAFF_HOST_HEADER) {
+    console.log(`STAFF_HOST_HEADER: ${STAFF_HOST_HEADER}`);
+  }
   console.log(`OPAC_URL: ${OPAC_URL}`);
+  if (OPAC_HOST_HEADER) {
+    console.log(`OPAC_HOST_HEADER: ${OPAC_HOST_HEADER}`);
+  }
   console.log(`STAFF_USER: ${STAFF_USER}`);
   console.log(`VUS: ${VUS}`);
   console.log(`ITERATIONS: ${ITERATIONS}`);
   console.log(`K6_BROWSER_HEADLESS: ${__ENV.K6_BROWSER_HEADLESS || "true (default)"}`);
   console.log("========================================");
 
+  const apiHeaders = {
+    Accept: "application/json",
+  };
+  if (STAFF_HOST_HEADER) {
+    apiHeaders["Host"] = STAFF_HOST_HEADER;
+  }
+
   const params = {
-    headers: {
-      Accept: "application/json",
-    },
+    headers: apiHeaders,
   };
 
   const patronCategoriesRes = http.get(
@@ -174,6 +187,12 @@ export default async function (data) {
 async function login(username, password, page) {
   try {
     page = page || (await browser.newPage());
+    
+    // Set Host header for staff interface if specified
+    if (STAFF_HOST_HEADER) {
+      await page.setExtraHTTPHeaders({ Host: STAFF_HOST_HEADER });
+    }
+    
     const mainUrl = `${STAFF_URL}/cgi-bin/koha/mainpage.pl`;
 
     await page.goto(mainUrl, { waitUntil: "networkidle" });
@@ -323,6 +342,14 @@ async function checkin(page, item) {
 async function search_opac(term, page) {
   console.log(`Searching OPAC for ${term}`);
   page = page || (await browser.newPage());
+
+  // Set Host header for OPAC if specified (may differ from staff)
+  if (OPAC_HOST_HEADER) {
+    await page.setExtraHTTPHeaders({ Host: OPAC_HOST_HEADER });
+  } else if (STAFF_HOST_HEADER) {
+    // Clear staff header if no OPAC header specified
+    await page.setExtraHTTPHeaders({});
+  }
 
   console.log(`Go to ${OPAC_URL}`);
   await page.goto(OPAC_URL);
@@ -555,13 +582,15 @@ export function handleSummary(data) {
 
   const summary = {
     metadata: {
-      testScript: "koha.js",
+      testScript: "koha_browser.js",
       testNumber: TEST_NUMBER,
       timestamp: new Date().toISOString(),
     },
     config: {
       staffUrl: STAFF_URL,
+      staffHostHeader: STAFF_HOST_HEADER || "(not set)",
       opacUrl: OPAC_URL,
+      opacHostHeader: OPAC_HOST_HEADER || "(not set)",
       staffUser: STAFF_USER,
       vus: VUS,
       iterations: ITERATIONS,
@@ -590,7 +619,7 @@ export function handleSummary(data) {
     checks: reporting.extractChecks(data),
   };
 
-  const outputPath = OUTPUT_FILE || reporting.generateOutputPath("koha", TEST_NUMBER);
+  const outputPath = OUTPUT_FILE || reporting.generateOutputPath("koha-browser", TEST_NUMBER);
 
   return {
     stdout: textSummary(data, { indent: "  ", enableColors: true }) + `\n  Output: ${outputPath}\n`,

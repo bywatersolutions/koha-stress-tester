@@ -12,15 +12,24 @@ UID=1000
 GID=1000
 
 # BENCH: Which benchmark to run
-#   - aspen_http.js  (Aspen, HTTP mode for headless servers)
-#   - aspen_browser.js (Aspen, browser mode)
-#   - koha.js        (Koha, browser mode)
-#   - solr_http.js   (Solr Cloud direct queries)
+#
+# HTTP mode scripts (use K6_IMAGE_TAG=latest):
+#   - aspen_http.js         (Aspen Discovery HTTP stress test)
+#   - koha_workflow_http.js (Koha full workflow: create/checkout/checkin/delete)
+#   - koha_api_http.js      (Koha REST API read-only queries)
+#   - koha_opac_http.js     (Koha OPAC patron interface)
+#   - solr_http.js          (Solr Cloud direct queries)
+#
+# Browser mode scripts (use K6_IMAGE_TAG=latest-with-browser):
+#   - aspen_browser.js      (Aspen Discovery browser test)
+#   - koha_browser.js       (Koha browser workflow test)
+#
 BENCH=solr_http.js
 
-# K6_IMAGE_TAG: Docker image to use
-#   - latest              (HTTP mode, smaller image)
-#   - latest-with-browser (browser mode)
+# K6_IMAGE_TAG: Docker image to use (must match BENCH script type)
+#   - latest              (HTTP scripts: *_http.js - smaller, faster)
+#   - latest-with-browser (Browser scripts: aspen_browser.js, koha_browser.js)
+# NOTE: Using wrong image will cause test to fail!
 K6_IMAGE_TAG=latest
 
 # ============================================================
@@ -49,14 +58,18 @@ SOLR_PASS=
 #SOLR_SECRET=solr-credentials
 #SOLR_SECRET_KEY=password
 
-# Koha (koha.js)
+# Koha (koha_browser.js, koha_workflow_http.js, koha_api_http.js, koha_opac_http.js)
 STAFF_URL=https://kohadev-intra.localhost
 OPAC_URL=https://kohadev.localhost
 STAFF_USER=koha
 STAFF_PASS=koha
+# If URLs are localhost, set HOST_HEADERs to the real domains
+# Comment these out if hitting the domains directly
+STAFF_HOST_HEADER=kohadev-intra.example.org
+OPAC_HOST_HEADER=kohadev.example.org
 
 # ============================================================
-# Browser Mode Parameters (aspen_browser.js, koha.js only)
+# Browser Mode Parameters (aspen_browser.js, koha_browser.js)
 # ============================================================
 VUS=1
 ITERATIONS=1
@@ -70,7 +83,7 @@ K6_BROWSER_HEADLESS=true
 RESULTS_TO_CLICK=5
 
 # ============================================================
-# Staged Load Test Parameters (aspen_http.js, solr_http.js)
+# Staged Load Test Parameters (HTTP mode scripts)
 # ============================================================
 
 MAX_VUS=150
@@ -82,24 +95,45 @@ HOLD_TIME=5s
 # Lower percentile = more tolerant of slow outliers (e.g., 90 = allow 10% slow)
 # Higher percentile = stricter (e.g., 99 = only allow 1% slow)
 THRESHOLD_PERCENTILE=98
+
+# Aspen thresholds (aspen_http.js)
 ASPEN_ABORT_MS=12000
-SOLR_ABORT_MS=2000
 ASPEN_REQUEST_TIMEOUT=10s
-
-# MAX_FAIL_CON_RATE: Maximum allowed connection/request failure rate (0.0-1.0)
-# Test aborts if failure rate exceeds this threshold
-# Examples: 0.05 = 5% failures allowed, 0.01 = 1% failures allowed
 ASPEN_MAX_FAIL_CON_RATE=0.05
-SOLR_MAX_FAIL_CON_RATE=0.05
-
-# Console logging: log individual slow requests above this threshold (ms)
 ASPEN_SLOW_LOG_MS=6000
+
+# Koha Workflow thresholds (koha_workflow_http.js)
+# Full CRUD workflow: create patron/biblio/item, checkout, checkin, delete
+# Lower VUs and higher timeouts since each iteration does many write operations
+KOHA_WORKFLOW_ABORT_MS=10000
+KOHA_WORKFLOW_REQUEST_TIMEOUT=30s
+KOHA_WORKFLOW_MAX_FAIL_CON_RATE=0.10
+KOHA_WORKFLOW_SLOW_LOG_MS=5000
+
+# Koha API thresholds (koha_api_http.js)
+# Read-only API queries - higher throughput testing
+KOHA_API_ABORT_MS=5000
+KOHA_API_REQUEST_TIMEOUT=10s
+KOHA_API_MAX_FAIL_CON_RATE=0.05
+KOHA_API_SLOW_LOG_MS=2000
+
+# Koha OPAC thresholds (koha_opac_http.js)
+KOHA_OPAC_ABORT_MS=8000
+KOHA_OPAC_REQUEST_TIMEOUT=15s
+KOHA_OPAC_MAX_FAIL_CON_RATE=0.05
+KOHA_OPAC_SLOW_LOG_MS=3000
+
+# Solr thresholds (solr_http.js)
+SOLR_ABORT_MS=2000
+SOLR_MAX_FAIL_CON_RATE=0.05
 SOLR_SLOW_LOG_MS=800
+
+# Common settings
 STATS_INTERVAL=10
 HARD_TIMEOUT=30m
 HOLD_ON_FAIL=30s
 
-# Think time between actions (aspen_http.js only)
+# Think time between actions (HTTP mode scripts)
 #   (blank)  = random delays (realistic user simulation)
 #   off      = no delays (maximum request rate)
 #   2        = fixed 2-second delay (or any number)
