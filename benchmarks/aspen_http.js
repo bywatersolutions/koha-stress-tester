@@ -27,6 +27,7 @@ const HOLD_ON_FAIL = __ENV.HOLD_ON_FAIL || "30s";
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
 const SLOW_LOG_MS = parseInt(__ENV.ASPEN_SLOW_LOG_MS) || 6000;
+const NO_CONNECTION_REUSE = ["1", "on", "true", "enabled"].includes((__ENV.NO_CONNECTION_REUSE || "").toLowerCase());
 
 // Think time configuration
 const THINK_TIME_RAW = __ENV.THINK_TIME || "";
@@ -64,6 +65,7 @@ const params = {
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   },
   timeout: REQUEST_TIMEOUT,
+  noConnectionReuse: NO_CONNECTION_REUSE,
 };
 
 function logRequestStatus(res, label, vus) {
@@ -125,6 +127,7 @@ export function setup() {
   console.log(`HOLD_ON_FAIL: ${HOLD_ON_FAIL}`);
   const thinkTimeStatus = THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s fixed` : "random");
   console.log(`THINK_TIME: ${thinkTimeStatus}`);
+  console.log(`NO_CONNECTION_REUSE: ${NO_CONNECTION_REUSE}`);
   console.log(`========================================`);
 }
 
@@ -231,6 +234,7 @@ export function handleSummary(data) {
       slowLogMs: SLOW_LOG_MS,
       requestTimeout: REQUEST_TIMEOUT,
       holdOnFail: HOLD_ON_FAIL,
+      noConnectionReuse: NO_CONNECTION_REUSE,
       solrUrl: SOLR_URL || "(not configured)",
     },
     thresholds: {

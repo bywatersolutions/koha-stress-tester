@@ -38,6 +38,7 @@ const HARD_TIMEOUT = __ENV.HARD_TIMEOUT || "30m";
 const HOLD_ON_FAIL = __ENV.HOLD_ON_FAIL || "30s";
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
+const NO_CONNECTION_REUSE = ["1", "on", "true", "enabled"].includes((__ENV.NO_CONNECTION_REUSE || "").toLowerCase());
 
 const words = new SharedArray("words", function () {
   return open("./words_alpha.txt").split(/\r?\n/).filter(w => w.trim());
@@ -58,6 +59,7 @@ const headers = solr.getSolrHeaders(SOLR_USER, SOLR_PASS);
 const params = {
   headers: headers,
   timeout: "30s",
+  noConnectionReuse: NO_CONNECTION_REUSE,
 };
 
 function generateStages() {
@@ -142,6 +144,7 @@ export function setup() {
   console.log(`STATS_INTERVAL: ${STATS_INTERVAL}s`);
   console.log(`HARD_TIMEOUT: ${HARD_TIMEOUT} (absolute max duration)`);
   console.log(`HOLD_ON_FAIL: ${HOLD_ON_FAIL} (stats capture before abort)`);
+  console.log(`NO_CONNECTION_REUSE: ${NO_CONNECTION_REUSE}`);
   console.log(`========================================`);
   
   try {
@@ -274,6 +277,7 @@ export function handleSummary(data) {
       hardTimeout: HARD_TIMEOUT,
       holdOnFail: HOLD_ON_FAIL,
       requestTimeout: "30s",
+      noConnectionReuse: NO_CONNECTION_REUSE,
     },
     thresholds: {
       httpReqDuration: `p(${THRESHOLD_PERCENTILE})<${ABORT_MS}ms`,

@@ -139,6 +139,15 @@ HOLD_ON_FAIL=30s
 #   2        = fixed 2-second delay (or any number)
 THINK_TIME=
 
+# Connection reuse behavior (HTTP mode scripts)
+# By default, each VU reuses connections (HTTP keep-alive) across all requests,
+# which simulates real browser behavior and tests sustained server capacity.
+# Set to true/on/1 to disable connection reuse (fresh TCP connection per request),
+# which tests connection handling overhead and connection storm scenarios.
+#   (blank)  = reuse connections (default, realistic browser behavior)
+#   true     = fresh connection per request (tests connection handling)
+NO_CONNECTION_REUSE=
+
 # Output file for JSON results (leave empty for auto-generated names)
 # File is written to ./output/ directory
 # Format: script-testnumber-shortdate-time.json (e.g., solr-001-20260108-2345.json)
