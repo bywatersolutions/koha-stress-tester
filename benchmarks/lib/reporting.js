@@ -64,17 +64,59 @@ export function formatSummary(data, options = {}) {
 /**
  * Extract abort reason from thresholds
  * @param {Object} data - k6 summary data
- * @returns {string|null} Abort reason or null
+ * @param {Object} config - Optional config with thresholdPercentile, abortMs, maxFailRate, peakVUs, maxVUs
+ * @returns {string} Abort reason or "completed" if test finished successfully
  */
-export function getAbortReason(data) {
+export function getAbortReason(data, config = {}) {
+  const failedThresholds = [];
+
+  // Method 1: Check k6's thresholds object for failures
   if (data.thresholds) {
     for (const [name, threshold] of Object.entries(data.thresholds)) {
-      if (!threshold.ok) {
-        return `${name} threshold crossed`;
+      if (threshold.ok === false) {
+        failedThresholds.push(name);
+      } else if (Array.isArray(threshold.thresholds)) {
+        for (const t of threshold.thresholds) {
+          if (t.ok === false) {
+            failedThresholds.push(name);
+            break;
+          }
+        }
       }
     }
   }
-  return null;
+
+  // Method 2: Check actual metrics against config (backup if k6 thresholds not reliable)
+  if (failedThresholds.length === 0 && config.abortMs && config.thresholdPercentile) {
+    const m = data.metrics;
+    const pctKey = `p(${config.thresholdPercentile})`;
+    const pctValue = m?.http_req_duration?.values?.[pctKey];
+    
+    if (pctValue && pctValue >= config.abortMs) {
+      failedThresholds.push(`http_req_duration p(${config.thresholdPercentile})=${pctValue.toFixed(0)}ms >= ${config.abortMs}ms`);
+    }
+  }
+
+  if (failedThresholds.length === 0 && config.maxFailRate) {
+    const failRate = data.metrics?.http_req_failed?.values?.rate || 0;
+    if (failRate >= config.maxFailRate) {
+      failedThresholds.push(`http_req_failed rate=${(failRate * 100).toFixed(1)}% >= ${(config.maxFailRate * 100).toFixed(0)}%`);
+    }
+  }
+
+  // Method 3: Check if test ended early (didn't reach max VUs)
+  if (failedThresholds.length === 0 && config.peakVUs && config.maxVUs) {
+    if (config.peakVUs < config.maxVUs) {
+      // Test ended before reaching max VUs - likely aborted but we don't know why
+      return `aborted early (reached ${config.peakVUs}/${config.maxVUs} VUs)`;
+    }
+  }
+
+  if (failedThresholds.length > 0) {
+    return `aborted: ${failedThresholds.join("; ")}`;
+  }
+
+  return "completed";
 }
 
 /**

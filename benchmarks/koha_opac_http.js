@@ -239,7 +239,13 @@ export default function () {
 
 export function handleSummary(data) {
   const m = data.metrics;
-  const abortReason = reporting.getAbortReason(data);
+  const abortReason = reporting.getAbortReason(data, {
+    thresholdPercentile: THRESHOLD_PERCENTILE,
+    abortMs: ABORT_MS,
+    maxFailRate: MAX_FAIL_CON_RATE,
+    peakVUs: __peakVUs,
+    maxVUs: MAX_VUS,
+  });
   const { totalRequests, testDuration, rps } = reporting.calculateDerivedMetrics(data);
 
   const summary = {
