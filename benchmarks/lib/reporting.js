@@ -85,12 +85,17 @@ export function getAbortReason(data) {
 export function calculateDerivedMetrics(data) {
   const m = data.metrics;
   const totalRequests = m.http_reqs?.values?.count || 0;
-  const testDuration =
-    m.iteration_duration?.values?.count > 0
-      ? (data.state?.testRunDurationMs || 0) / 1000
-      : 0;
-  const rps =
-    testDuration > 0 ? (totalRequests / testDuration).toFixed(2) : null;
+
+  // Use k6's built-in rate metric (requests/second) - more reliable than data.state
+  const rps = m.http_reqs?.values?.rate?.toFixed(2) || null;
+
+  // Calculate duration from rate, or fall back to state
+  let testDuration = 0;
+  if (rps && parseFloat(rps) > 0) {
+    testDuration = totalRequests / parseFloat(rps);
+  } else if (data.state?.testRunDurationMs) {
+    testDuration = data.state.testRunDurationMs / 1000;
+  }
 
   return { totalRequests, testDuration, rps };
 }
