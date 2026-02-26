@@ -43,8 +43,9 @@ BASE_URL=https://localhost
 HOST_HEADER=INST.aspendiscovery.org
 
 # Solr (solr_http.js)
+# Default port is 8983 for Solr Cloud; standalone Solr may use 8080
 SOLR_URL=http://localhost:8983
-SOLR_CORE=grouped_works
+SOLR_CORE=grouped_works_v2
 SOLR_USER=
 SOLR_PASS=
 # SOLR_HOST_IP: Map hostname to IP (for Tailscale, VPNs, or custom DNS)
