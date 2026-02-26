@@ -11,8 +11,9 @@ import { randomElement } from "./lib/utils.js";
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
 // ------------------------------------------------------------
+// Default port 8983 for Solr Cloud; standalone Solr may use 8080
 const SOLR_URL = __ENV.SOLR_URL || "https://solr.example.com:8983";
-const SOLR_CORE = __ENV.SOLR_CORE || "grouped_works";
+const SOLR_CORE = __ENV.SOLR_CORE || "grouped_works_v2";
 const SOLR_USER = __ENV.SOLR_USER || "";
 const SOLR_PASS = __ENV.SOLR_PASS || "";
 // SOLR_HOST_IP: Map the hostname in SOLR_URL to this IP address
