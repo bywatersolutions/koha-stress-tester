@@ -26,6 +26,22 @@ data:
     const HOLD_TIME = __ENV.HOLD_TIME || "{{ .Values.test.holdTime }}";
     const TIMEOUT = __ENV.TIMEOUT || "{{ .Values.test.timeout }}";
 
+    // Think time configuration
+    const THINK_TIME_RAW = __ENV.THINK_TIME || "";
+    const THINK_TIME_DISABLED = ["0", "off", "false", "disabled"].includes(THINK_TIME_RAW.toLowerCase());
+    const THINK_TIME_FIXED = !THINK_TIME_DISABLED && THINK_TIME_RAW ? parseFloat(THINK_TIME_RAW) : null;
+
+    function thinkTime(maxRandom) {
+      if (THINK_TIME_DISABLED) {
+        return;
+      }
+      if (THINK_TIME_FIXED !== null) {
+        sleep(THINK_TIME_FIXED);
+      } else {
+        sleep(Math.random() * maxRandom);
+      }
+    }
+
     // Load words from file
     const words = new SharedArray("words", function() {
       return open("/scripts/words.txt").split(/\r?\n/).filter(w => w.trim());
@@ -99,6 +115,8 @@ data:
       console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
       console.log(`Word list: ${words.length} words`);
       console.log(`Aborts when p(95) response time exceeds 2s`);
+      const thinkTimeStatus = THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s fixed` : "random");
+      console.log(`THINK_TIME: ${thinkTimeStatus}`);
       
       // Fetch and display Solr system info
       const sysInfo = fetchSolrSystemInfo();
@@ -142,6 +160,8 @@ data:
         "response < 1000ms": (r) => r.timings.duration < 1000,
         "response < 2000ms": (r) => r.timings.duration < 2000,
       });
+
+      thinkTime(1);
     }
 
     export function teardown() {
@@ -171,6 +191,7 @@ data:
           vu_step: VU_STEP,
           ramp_time: RAMP_TIME,
           hold_time: HOLD_TIME,
+          thinkTime: THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s` : "random"),
         },
         metrics: data.metrics,
         solrSystem: solrSystemInfo,

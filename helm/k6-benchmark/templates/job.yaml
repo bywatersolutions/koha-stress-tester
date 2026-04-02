@@ -48,6 +48,8 @@ spec:
               value: "{{ .Values.test.holdTime }}"
             - name: TIMEOUT
               value: "{{ .Values.test.timeout }}"
+            - name: THINK_TIME
+              value: "{{ .Values.test.thinkTime }}"
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

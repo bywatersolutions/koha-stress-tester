@@ -29,6 +29,10 @@ test:
   rampTime: "5s"
   holdTime: "5s"
 
+  # Think time between requests per VU iteration
+  # "" = random (0 to 1s), "0"/"off"/"false"/"disabled" = none, or a number for fixed seconds
+  thinkTime: ""
+
   # Request timeout
   timeout: "30s"
 

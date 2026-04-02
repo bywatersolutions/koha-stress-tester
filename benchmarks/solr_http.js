@@ -41,6 +41,22 @@ const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
 const NO_CONNECTION_REUSE = ["1", "on", "true", "enabled"].includes((__ENV.NO_CONNECTION_REUSE || "").toLowerCase());
 
+// Think time configuration
+const THINK_TIME_RAW = __ENV.THINK_TIME || "";
+const THINK_TIME_DISABLED = ["0", "off", "false", "disabled"].includes(THINK_TIME_RAW.toLowerCase());
+const THINK_TIME_FIXED = !THINK_TIME_DISABLED && THINK_TIME_RAW ? parseFloat(THINK_TIME_RAW) : null;
+
+function thinkTime(maxRandom) {
+  if (THINK_TIME_DISABLED) {
+    return;
+  }
+  if (THINK_TIME_FIXED !== null) {
+    sleep(THINK_TIME_FIXED);
+  } else {
+    sleep(Math.random() * maxRandom);
+  }
+}
+
 const words = new SharedArray("words", function () {
   return open("./words_alpha.txt").split(/\r?\n/).filter(w => w.trim());
 });
@@ -145,6 +161,8 @@ export function setup() {
   console.log(`STATS_INTERVAL: ${STATS_INTERVAL}s`);
   console.log(`HARD_TIMEOUT: ${HARD_TIMEOUT} (absolute max duration)`);
   console.log(`HOLD_ON_FAIL: ${HOLD_ON_FAIL} (stats capture before abort)`);
+  const thinkTimeStatus = THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s fixed` : "random");
+  console.log(`THINK_TIME: ${thinkTimeStatus}`);
   console.log(`NO_CONNECTION_REUSE: ${NO_CONNECTION_REUSE}`);
   console.log(`========================================`);
   
@@ -219,7 +237,7 @@ export default function () {
     "response < 2000ms": (r) => r.timings.duration < 2000,
   });
 
-  sleep(1);
+  thinkTime(1);
 }
 
 export function collectStats() {
@@ -272,6 +290,7 @@ export function handleSummary(data) {
       solrUrl: SOLR_URL,
       solrCore: SOLR_CORE,
       solrUser: SOLR_USER ? "(set)" : "(not set)",
+      thinkTime: THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s` : "random"),
       maxVUs: MAX_VUS,
       vuStep: VU_STEP,
       rampTime: RAMP_TIME,
