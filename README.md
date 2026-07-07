@@ -153,9 +153,9 @@ production instead of a synthetic one:
    distribution) and a weighted list of real patron search terms.
 2. Copy both files into `benchmarks/data/` (gitignored - real search terms
    can contain patron PII) and start from `env-templates/realistic.env`.
-3. With `SESSIONS_PER_HOUR` set, `koha_opac_http.js` switches from the staged
-   VU ramp to an arrival-rate model: sessions start at the measured hourly
-   rate whether or not the server keeps up, searching real terms at their
+3. With `OPAC_SEARCHES_PER_HOUR` set, `koha_opac_http.js` switches from the
+   staged VU ramp to an arrival-rate model: sessions start at the measured
+   hourly rate whether or not the server keeps up, searching real terms at their
    real frequencies with measured think times and click-through rates.
 4. Validate by running the analyzer on the staging server's access log during
    the test and comparing against production with `--compare`.

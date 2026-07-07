@@ -24,7 +24,7 @@ with it - useful for finding a breaking point, but it can't answer "will we
 survive Tuesday at 4pm", because real patrons don't slow down their arrival
 just because the server is busy.
 
-Setting `SESSIONS_PER_HOUR` (or `WORKFLOW_RATE_PER_HOUR` for the staff
+Setting `OPAC_SEARCHES_PER_HOUR` (or `WORKFLOW_RATE_PER_HOUR` for the staff
 workflow) switches to an *open* model: k6's `ramping-arrival-rate` executor
 starts sessions at the measured hourly rate no matter how slow the server
 gets. If the server can't keep up, latency climbs and (eventually)
@@ -117,7 +117,7 @@ cp env-templates/realistic.env .env
 
 | calibration.json field                | .env variable                       |
 | ------------------------------------- | ----------------------------------- |
-| `arrival.sessions_per_hour`            | `SESSIONS_PER_HOUR`                 |
+| `arrival.searches_per_hour`            | `OPAC_SEARCHES_PER_HOUR`            |
 | (whole file)                           | `CALIBRATION_FILE=data/calibration.json` |
 | (terms file)                           | `SEARCH_TERMS_FILE=data/search_terms.json` |
 | `sessions.click_through_rate`          | automatic; `CLICK_THROUGH_RATE` overrides |
@@ -126,9 +126,10 @@ cp env-templates/realistic.env .env
 | `sessions.think_time_s.quantiles`      | automatic when `THINK_TIME` is blank (capped at 120s) |
 | statistics SQL peak-hour checkouts     | `WORKFLOW_RATE_PER_HOUR` (staff run) |
 
-To model a specific search volume rather than a session rate (e.g. "12,929
-searches in the peak hour"), divide by the measured searches per session:
-`SESSIONS_PER_HOUR = target_searches_per_hour / sessions.searches_per_session.mean`.
+To model a specific search volume (e.g. "12,929 searches in the peak hour"),
+just set `OPAC_SEARCHES_PER_HOUR` to that number - the script converts it to a
+session arrival rate internally by dividing by the searches each session
+issues (one main search plus the subject browse).
 
 For headroom testing, run again at 2-3x the measured rate - the measured
 hour is an average, and the peak minutes inside it run hotter.
@@ -177,7 +178,7 @@ Procedure:
 
 3. **First check the load generator, then the server.** Staging req/s,
    searches/hr, and sessions/hr should be within ~10% of production. If not,
-   the *generator* is miscalibrated - fix `SESSIONS_PER_HOUR` /
+   the *generator* is miscalibrated - fix `OPAC_SEARCHES_PER_HOUR` /
    `PRE_ALLOCATED_VUS` before reading anything into server metrics.
 4. Then compare the server fingerprint at equal request rate. Suggested
    tolerances: ±20% on CPU, MySQL QPS, and endpoint mix percentages; ±25% on

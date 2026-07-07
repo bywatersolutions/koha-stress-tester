@@ -94,8 +94,9 @@ HOLD_TIME=5s
 
 # Abort test when p(THRESHOLD_PERCENTILE) response time exceeds ABORT threshold
 # Lower percentile = more tolerant of slow outliers (e.g., 90 = allow 10% slow)
-# Higher percentile = stricter (e.g., 99 = only allow 1% slow)
-THRESHOLD_PERCENTILE=98
+# Higher percentile = stricter (e.g., 99 = only allow 1% slow); p95 avoids the
+# twitchiness of p98 while still catching real degradation
+THRESHOLD_PERCENTILE=95
 
 # Aspen thresholds (aspen_http.js)
 ASPEN_ABORT_MS=12000
@@ -118,8 +119,11 @@ KOHA_API_REQUEST_TIMEOUT=10s
 KOHA_API_MAX_FAIL_CON_RATE=0.05
 KOHA_API_SLOW_LOG_MS=2000
 
-# Koha OPAC thresholds (koha_opac_http.js)
-KOHA_OPAC_ABORT_MS=8000
+# Koha OPAC thresholds (koha_opac_http.js). Abort when p95 search time exceeds
+# 10s or >5% of requests fail - the line between a loaded-but-usable OPAC and a
+# saturated one. Raise all three for a characterization ladder (measure, don't
+# abort).
+KOHA_OPAC_ABORT_MS=10000
 KOHA_OPAC_REQUEST_TIMEOUT=15s
 KOHA_OPAC_MAX_FAIL_CON_RATE=0.05
 KOHA_OPAC_SLOW_LOG_MS=3000
@@ -156,12 +160,13 @@ THINK_TIME=
 # Measured think times, click-through rate, paging rate (koha_opac_http.js)
 #CALIBRATION_FILE=data/calibration.json
 
-# Open model: sessions arrive at this hourly rate regardless of server
-# speed (ramping-arrival-rate executor) instead of the staged VU ramp.
-# Use arrival.sessions_per_hour from calibration.json
-#SESSIONS_PER_HOUR=
+# Open model: drive this many opac-search.pl requests per hour regardless of
+# server speed (ramping-arrival-rate executor) instead of the staged VU ramp.
+# The script converts it to a session rate (a session issues > 1 search).
+# Use arrival.searches_per_hour from calibration.json
+#OPAC_SEARCHES_PER_HOUR=
 
-# Expert override: iterations per SECOND (wins over SESSIONS_PER_HOUR)
+# Expert override: sessions per SECOND (wins over OPAC_SEARCHES_PER_HOUR)
 #ARRIVAL_RATE=
 
 # Steady-state duration at the target rate (open model only)
