@@ -35,23 +35,40 @@ const MAX_VUS = parseInt(__ENV.MAX_VUS) || 150;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
 const RAMP_TIME = __ENV.RAMP_TIME || "5s";
 const HOLD_TIME = __ENV.HOLD_TIME || "5s";
-const ABORT_MS = parseInt(__ENV.KOHA_OPAC_ABORT_MS) || 8000;
-const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 98;
+// Certification defaults: abort the run when the OPAC is clearly failing
+// patrons. p95 ( not the twitchy p98 ) over 10s, or more than 5% of requests
+// failing, both cleanly separate a loaded-but-usable OPAC ( ~6s p95, <1% fail
+// in testing ) from a saturated one ( 15s timeouts, >50% fail ). For a
+// characterization ladder, raise these so the run measures instead of aborting.
+const ABORT_MS = parseInt(__ENV.KOHA_OPAC_ABORT_MS) || 10000;
+const THRESHOLD_PERCENTILE = parseInt(__ENV.THRESHOLD_PERCENTILE) || 95;
 const MAX_FAIL_CON_RATE = parseFloat(__ENV.KOHA_OPAC_MAX_FAIL_CON_RATE) || 0.05;
 const REQUEST_TIMEOUT = __ENV.KOHA_OPAC_REQUEST_TIMEOUT || "15s";
 const REQUEST_TIMEOUT_MS = parseInt(REQUEST_TIMEOUT) * 1000;
 const HOLD_ON_FAIL = __ENV.HOLD_ON_FAIL || "30s";
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
+
+// Grafana Cloud test metadata. Without CLOUD_PROJECT_ID a cloud run lands in
+// the org's default project ( and its VU limit ), not the project whose
+// limit you raised - so set this to target a specific project.
+const CLOUD_TEST_NAME = __ENV.CLOUD_TEST_NAME || "koha-opac";
+const CLOUD_PROJECT_ID = __ENV.CLOUD_PROJECT_ID || "";
 const SLOW_LOG_MS = parseInt(__ENV.KOHA_OPAC_SLOW_LOG_MS) || 3000;
 const RESULTS_TO_CLICK = parseInt(__ENV.RESULTS_TO_CLICK) || 3;
 const NO_CONNECTION_REUSE = ["1", "on", "true", "enabled"].includes((__ENV.NO_CONNECTION_REUSE || "").toLowerCase());
 
 // Calibrated workload configuration (see docs/CALIBRATION.md). All optional -
 // with none of these set, behavior is identical to the legacy staged test.
-const SEARCH_TERMS_FILE = __ENV.SEARCH_TERMS_FILE || "";
 const CALIBRATION_FILE = __ENV.CALIBRATION_FILE || "";
-const SESSIONS_PER_HOUR = parseFloat(__ENV.SESSIONS_PER_HOUR) || 0;
+// Optional: override the embedded terms with a weighted file of real extracted
+// patron queries ( analyze-koha-logs.pl output ). Leave unset to use the
+// self-contained embedded list.
+const SEARCH_TERMS_FILE = __ENV.SEARCH_TERMS_FILE || "";
+// Open-model target: actual opac-search.pl requests per hour ( the number the
+// 12,929-peak requirement is stated in ). Converted to a session arrival rate
+// internally, since a session issues more than one search.
+const OPAC_SEARCHES_PER_HOUR = parseFloat(__ENV.OPAC_SEARCHES_PER_HOUR) || 0;
 const ARRIVAL_RATE = parseFloat(__ENV.ARRIVAL_RATE) || 0;
 const DURATION = __ENV.DURATION || "15m";
 const PRE_ALLOCATED_VUS = parseInt(__ENV.PRE_ALLOCATED_VUS) || 0;
@@ -124,23 +141,39 @@ const browseProbability = calibration
   ? (calSessions.paging_rate != null ? calSessions.paging_rate : 0)
   : 1;
 
-// Search terms: weighted real patron queries when SEARCH_TERMS_FILE is set,
-// falling back to uniform random dictionary words. Both are stored as
-// { t: term, c: cumulative weight } for weightedElement().
+// Embedded search terms: common public-library queries that return large
+// result sets - the expensive search-and-render path an OPAC capacity test
+// must exercise ( random dictionary words return zero results and are cheap ).
+// Weighted roughly by popularity. Kept in the script so the test is self-
+// contained ( no data file to bundle ). Stored as { t: term, c: cumulative
+// weight } for weightedElement().
+const SEARCH_TERMS = [
+  ["history", 12], ["mystery", 11], ["love", 10], ["children", 9],
+  ["war", 8], ["biography", 8], ["science", 7], ["spanish", 6],
+  ["cooking", 6], ["music", 5], ["james patterson", 5], ["harry potter", 5],
+  ["art", 4], ["travel", 4],
+];
+// Embedded terms by default; a SEARCH_TERMS_FILE ( weighted { t, w } JSON from
+// analyze-koha-logs.pl ) overrides them for calibration replay. SharedArray so
+// a large extracted list isn't copied per VU.
 const terms = new SharedArray("search terms", function () {
   if (SEARCH_TERMS_FILE) {
     try {
       const parsed = JSON.parse(open(`./${SEARCH_TERMS_FILE}`));
       let cum = 0;
-      return parsed.terms.map((e) => {
+      return parsed.terms.map(function (e) {
         cum += e.w;
         return { t: e.t, c: cum };
       });
     } catch (e) {
-      console.warn(`SEARCH_TERMS_FILE "${SEARCH_TERMS_FILE}" could not be loaded (${e}), FALLING BACK to words_alpha.txt`);
+      console.warn(`SEARCH_TERMS_FILE "${SEARCH_TERMS_FILE}" could not be loaded (${e}), using embedded terms`);
     }
   }
-  return open("./words_alpha.txt").split(/\r?\n/).filter(w => w.trim()).map((t, i) => ({ t, c: i + 1 }));
+  let cum = 0;
+  return SEARCH_TERMS.map(function (e) {
+    cum += e[1];
+    return { t: e[0], c: cum };
+  });
 });
 
 const opacHeaders = {
@@ -181,12 +214,24 @@ function generateStages() {
   return stages;
 }
 
+// A session issues one main search plus, when browseProbability fires, one
+// subject-browse search - both hit opac-search.pl and count toward
+// OPAC_SEARCHES_PER_HOUR. Convert the target search rate to a session rate.
+const SEARCHES_PER_SESSION = 1 + browseProbability;
+const SESSIONS_PER_HOUR = OPAC_SEARCHES_PER_HOUR ? OPAC_SEARCHES_PER_HOUR / SEARCHES_PER_SESSION : 0;
+
 // Open model (arrival rate) when a rate is configured, legacy staged
 // closed model otherwise
 const RATE_PER_HOUR = ARRIVAL_RATE ? ARRIVAL_RATE * 3600 : SESSIONS_PER_HOUR;
 const LOAD_MODEL = RATE_PER_HOUR ? "open" : "staged";
 
+const cloudConfig = { name: CLOUD_TEST_NAME };
+if (CLOUD_PROJECT_ID) {
+  cloudConfig.projectID = parseInt(CLOUD_PROJECT_ID);
+}
+
 export const options = {
+  cloud: cloudConfig,
   insecureSkipTLSVerify: true,
   ...buildLoadOptions({
     ratePerHour: RATE_PER_HOUR,
@@ -224,8 +269,8 @@ export function setup() {
   if (OPAC_HOST_HEADER) {
     console.log(`OPAC_HOST_HEADER: ${OPAC_HOST_HEADER}`);
   }
-  console.log(`LOAD_MODEL: ${LOAD_MODEL}${RATE_PER_HOUR ? ` (${RATE_PER_HOUR} sessions/hour, ${DURATION} steady state)` : ""}`);
-  console.log(`SEARCH_TERMS: ${terms.length} entries (${SEARCH_TERMS_FILE || "words_alpha.txt"})`);
+  console.log(`LOAD_MODEL: ${LOAD_MODEL}${RATE_PER_HOUR ? ` (${OPAC_SEARCHES_PER_HOUR} searches/hour = ${RATE_PER_HOUR.toFixed(0)} sessions/hour x ${SEARCHES_PER_SESSION} searches, ${DURATION} steady state)` : ""}`);
+  console.log(`SEARCH_TERMS: ${terms.length} terms (${SEARCH_TERMS_FILE || "embedded"})`);
   if (CALIBRATION_FILE) {
     console.log(`CALIBRATION_FILE: ${CALIBRATION_FILE}${calibration ? "" : " (FAILED TO LOAD, using defaults)"}`);
   }
@@ -374,8 +419,9 @@ export function handleSummary(data) {
       opacUrl: OPAC_URL,
       opacHostHeader: OPAC_HOST_HEADER || "(not set)",
       loadModel: LOAD_MODEL,
-      sessionsPerHour: RATE_PER_HOUR || null,
-      searchTermsFile: SEARCH_TERMS_FILE || "(words_alpha.txt)",
+      opacSearchesPerHour: OPAC_SEARCHES_PER_HOUR || null,
+      sessionsPerHour: RATE_PER_HOUR ? Number(RATE_PER_HOUR.toFixed(0)) : null,
+      searchTerms: terms.length + (SEARCH_TERMS_FILE ? ` (${SEARCH_TERMS_FILE})` : " embedded"),
       calibrationFile: CALIBRATION_FILE || "(not set)",
       clickThroughRate: clickThroughRate !== null ? clickThroughRate : "(legacy RESULTS_TO_CLICK)",
       resultsToClick: RESULTS_TO_CLICK,
