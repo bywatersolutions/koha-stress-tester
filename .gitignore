@@ -51,3 +51,6 @@ benchmarks/data/*
 # Failure screenshots from browser tests (saved relative to the run cwd)
 benchmarks/*.png
 training_*.png
+
+# Editor swap files
+*.swp
