@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "generated": "2026-06-30T12:00:00Z",
+  "source_window": {
+    "from": "2026-06-29 09:00",
+    "to": "2026-06-29 10:00"
+  },
+  "total_weight": 216,
+  "terms": [
+    { "t": "harry potter", "w": 42 },
+    { "t": "dog man", "w": 31 },
+    { "t": "james patterson", "w": 24 },
+    { "t": "colleen hoover", "w": 19 },
+    { "t": "diary of a wimpy kid", "w": 17 },
+    { "t": "the housemaid", "w": 15 },
+    { "t": "stephen king", "w": 13 },
+    { "t": "fourth wing", "w": 12 },
+    { "t": "large print mysteries", "w": 10 },
+    { "t": "cookbooks", "w": 9 },
+    { "t": "danielle steel", "w": 8 },
+    { "t": "minecraft", "w": 6 },
+    { "t": "resume writing", "w": 4 },
+    { "t": "local history", "w": 3 },
+    { "t": "knitting patterns", "w": 3 }
+  ]
+}

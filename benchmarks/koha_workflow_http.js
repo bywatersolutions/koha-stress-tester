@@ -22,7 +22,7 @@ import exec from "k6/execution";
 import encoding from "k6/encoding";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 import * as reporting from "./lib/reporting.js";
-import { randomElement, randomString, generateUUID } from "./lib/utils.js";
+import { randomElement, randomString, generateUUID, buildLoadOptions } from "./lib/utils.js";
 
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
@@ -47,6 +47,14 @@ const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
 const SLOW_LOG_MS = parseInt(__ENV.KOHA_WORKFLOW_SLOW_LOG_MS) || 5000;
 const NO_CONNECTION_REUSE = ["1", "on", "true", "enabled"].includes((__ENV.NO_CONNECTION_REUSE || "").toLowerCase());
+
+// Open-model arrival rate (see docs/CALIBRATION.md). One iteration is one
+// circ workflow (1 checkout + 1 checkin), so set this to the peak-hour
+// checkout count from the Koha statistics table. Unset = legacy staged model.
+const WORKFLOW_RATE_PER_HOUR = parseFloat(__ENV.WORKFLOW_RATE_PER_HOUR) || 0;
+const DURATION = __ENV.DURATION || "15m";
+const PRE_ALLOCATED_VUS = parseInt(__ENV.PRE_ALLOCATED_VUS) || 0;
+const LOAD_MODEL = WORKFLOW_RATE_PER_HOUR ? "open" : "staged";
 
 // Think time configuration
 const THINK_TIME_RAW = __ENV.THINK_TIME || "";
@@ -125,8 +133,15 @@ function generateStages() {
 
 export const options = {
   insecureSkipTLSVerify: true,
-  gracefulStop: "30s",
-  stages: generateStages(),
+  ...buildLoadOptions({
+    ratePerHour: WORKFLOW_RATE_PER_HOUR,
+    duration: DURATION,
+    rampTime: RAMP_TIME,
+    preAllocatedVUs: PRE_ALLOCATED_VUS,
+    maxVUs: MAX_VUS,
+    gracefulStop: "30s",
+    generateStages,
+  }),
   summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", `p(${THRESHOLD_PERCENTILE})`],
   thresholds: {
     http_req_duration: [
@@ -158,6 +173,7 @@ export function setup() {
     console.log(`STAFF_HOST_HEADER: ${STAFF_HOST_HEADER}`);
   }
   console.log(`STAFF_USER: ${STAFF_USER}`);
+  console.log(`LOAD_MODEL: ${LOAD_MODEL}${WORKFLOW_RATE_PER_HOUR ? ` (${WORKFLOW_RATE_PER_HOUR} workflows/hour, ${DURATION} steady state)` : ""}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
   console.log(`ABORT_MS: ${ABORT_MS} (abort test when p(${THRESHOLD_PERCENTILE}) exceeds this)`);
@@ -404,6 +420,8 @@ export function handleSummary(data) {
       staffUrl: STAFF_URL,
       staffHostHeader: STAFF_HOST_HEADER || "(not set)",
       staffUser: STAFF_USER,
+      loadModel: LOAD_MODEL,
+      workflowRatePerHour: WORKFLOW_RATE_PER_HOUR || null,
       thinkTime: THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s` : "random"),
       maxVUs: MAX_VUS,
       vuStep: VU_STEP,

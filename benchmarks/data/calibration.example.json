@@ -1,0 +1,44 @@
+{
+  "v": 1,
+  "meta": {
+    "generated": "2026-06-30T12:00:00Z",
+    "window": { "from": "2026-06-29 09:00", "to": "2026-06-29 10:00" },
+    "files": ["access.log"],
+    "lines_total": 812345,
+    "lines_parsed": 810102,
+    "lines_skipped": 2243,
+    "out_of_window": 0,
+    "bot_requests_pct": 34.2,
+    "negative_gaps": 0,
+    "has_response_times": true,
+    "response_time_unit": "us",
+    "session_timeout_s": 1800
+  },
+  "arrival": {
+    "req_per_sec": 41.7,
+    "page_req_per_sec": 6.2,
+    "searches_per_sec": 0.51,
+    "searches_per_hour": 1836,
+    "sessions_per_hour": 611,
+    "per_minute": [
+      { "m": "2026-06-29 09:00", "req": 2460, "pages": 371, "searches": 30, "sessions_started": 10 }
+    ]
+  },
+  "endpoints": [
+    { "path": "opac-detail.pl", "count": 9120, "pct": 30.9, "p50_ms": 240, "p95_ms": 910 },
+    { "path": "opac-search.pl", "count": 7411, "pct": 25.1, "p50_ms": 480, "p95_ms": 1650 },
+    { "path": "opac-main.pl", "count": 4102, "pct": 13.9, "p50_ms": 150, "p95_ms": 420 }
+  ],
+  "sessions": {
+    "count": 611,
+    "pages_per_session": { "mean": 5.4, "p50": 3, "p90": 12, "p99": 38 },
+    "searches_per_session": { "mean": 1.7, "p50": 1, "p90": 4 },
+    "click_through_rate": 0.63,
+    "detail_views_per_search": 1.4,
+    "paging_rate": 0.18,
+    "think_time_s": {
+      "mean": 17.8,
+      "quantiles": [0, 1, 3, 4, 6, 9, 13, 20, 31, 56, 240]
+    }
+  }
+}

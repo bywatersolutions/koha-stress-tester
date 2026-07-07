@@ -16,7 +16,7 @@ import { SharedArray } from "k6/data";
 import exec from "k6/execution";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 import * as reporting from "./lib/reporting.js";
-import { randomElement } from "./lib/utils.js";
+import { weightedElement, sampleQuantiles, buildLoadOptions } from "./lib/utils.js";
 
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
@@ -41,6 +41,18 @@ const SLOW_LOG_MS = parseInt(__ENV.KOHA_OPAC_SLOW_LOG_MS) || 3000;
 const RESULTS_TO_CLICK = parseInt(__ENV.RESULTS_TO_CLICK) || 3;
 const NO_CONNECTION_REUSE = ["1", "on", "true", "enabled"].includes((__ENV.NO_CONNECTION_REUSE || "").toLowerCase());
 
+// Calibrated workload configuration (see docs/CALIBRATION.md). All optional -
+// with none of these set, behavior is identical to the legacy staged test.
+const SEARCH_TERMS_FILE = __ENV.SEARCH_TERMS_FILE || "";
+const CALIBRATION_FILE = __ENV.CALIBRATION_FILE || "";
+const SESSIONS_PER_HOUR = parseFloat(__ENV.SESSIONS_PER_HOUR) || 0;
+const ARRIVAL_RATE = parseFloat(__ENV.ARRIVAL_RATE) || 0;
+const DURATION = __ENV.DURATION || "15m";
+const PRE_ALLOCATED_VUS = parseInt(__ENV.PRE_ALLOCATED_VUS) || 0;
+const CLICK_THROUGH_RATE = __ENV.CLICK_THROUGH_RATE ? parseFloat(__ENV.CLICK_THROUGH_RATE) : null;
+const DETAIL_VIEWS_PER_SEARCH = __ENV.DETAIL_VIEWS_PER_SEARCH ? parseFloat(__ENV.DETAIL_VIEWS_PER_SEARCH) : null;
+const THINK_TIME_CAP_S = 120;
+
 // Think time configuration
 const THINK_TIME_RAW = __ENV.THINK_TIME || "";
 const THINK_TIME_DISABLED = ["0", "off", "false", "disabled"].includes(THINK_TIME_RAW.toLowerCase());
@@ -52,15 +64,77 @@ function thinkTime(maxRandom) {
   }
   if (THINK_TIME_FIXED !== null) {
     sleep(THINK_TIME_FIXED);
+  } else if (thinkQuantiles) {
+    // Measured distribution; capped so a p100 outlier can't stall a VU
+    sleep(Math.min(THINK_TIME_CAP_S, sampleQuantiles(thinkQuantiles)));
   } else {
     sleep(Math.random() * maxRandom);
   }
 }
 
+// How many search results to open. With a measured click-through rate the
+// count is drawn per search: most searches click 0 or 1 results, with a
+// geometric tail matching the measured detail views per search.
+function sampleClickCount() {
+  if (clickThroughRate === null) {
+    return RESULTS_TO_CLICK;
+  }
+  if (Math.random() >= clickThroughRate) {
+    return 0;
+  }
+  const meanPerClickingSearch =
+    detailViewsPerSearch && clickThroughRate > 0
+      ? Math.max(1, detailViewsPerSearch / clickThroughRate)
+      : 1;
+  const p = 1 / meanPerClickingSearch;
+  let clicks = 1;
+  while (clicks < 10 && Math.random() > p) {
+    clicks++;
+  }
+  return clicks;
+}
+
 let __peakVUs = 0;
 
-const words = new SharedArray("words", function () {
-  return open("./words_alpha.txt").split(/\r?\n/).filter(w => w.trim());
+// Calibration data (optional): measured think times, click-through rate, and
+// paging rate produced by bin/analyze-koha-logs.pl
+let calibration = null;
+if (CALIBRATION_FILE) {
+  try {
+    calibration = JSON.parse(open(`./${CALIBRATION_FILE}`));
+  } catch (e) {
+    console.warn(`CALIBRATION_FILE "${CALIBRATION_FILE}" could not be loaded (${e}), using built-in defaults`);
+  }
+}
+const calSessions = (calibration && calibration.sessions) || {};
+const thinkQuantiles = (calSessions.think_time_s && calSessions.think_time_s.quantiles) || null;
+const clickThroughRate = CLICK_THROUGH_RATE !== null ? CLICK_THROUGH_RATE
+  : (calSessions.click_through_rate != null ? calSessions.click_through_rate : null);
+const detailViewsPerSearch = DETAIL_VIEWS_PER_SEARCH !== null ? DETAIL_VIEWS_PER_SEARCH
+  : (calSessions.detail_views_per_search != null ? calSessions.detail_views_per_search : null);
+// The subject browse step approximates result-page pagination; without
+// calibration it runs every iteration (legacy behavior)
+const browseProbability = calibration
+  ? (calSessions.paging_rate != null ? calSessions.paging_rate : 0)
+  : 1;
+
+// Search terms: weighted real patron queries when SEARCH_TERMS_FILE is set,
+// falling back to uniform random dictionary words. Both are stored as
+// { t: term, c: cumulative weight } for weightedElement().
+const terms = new SharedArray("search terms", function () {
+  if (SEARCH_TERMS_FILE) {
+    try {
+      const parsed = JSON.parse(open(`./${SEARCH_TERMS_FILE}`));
+      let cum = 0;
+      return parsed.terms.map((e) => {
+        cum += e.w;
+        return { t: e.t, c: cum };
+      });
+    } catch (e) {
+      console.warn(`SEARCH_TERMS_FILE "${SEARCH_TERMS_FILE}" could not be loaded (${e}), FALLING BACK to words_alpha.txt`);
+    }
+  }
+  return open("./words_alpha.txt").split(/\r?\n/).filter(w => w.trim()).map((t, i) => ({ t, c: i + 1 }));
 });
 
 const opacHeaders = {
@@ -98,10 +172,22 @@ function generateStages() {
   return stages;
 }
 
+// Open model (arrival rate) when a rate is configured, legacy staged
+// closed model otherwise
+const RATE_PER_HOUR = ARRIVAL_RATE ? ARRIVAL_RATE * 3600 : SESSIONS_PER_HOUR;
+const LOAD_MODEL = RATE_PER_HOUR ? "open" : "staged";
+
 export const options = {
   insecureSkipTLSVerify: true,
-  gracefulStop: "10s",
-  stages: generateStages(),
+  ...buildLoadOptions({
+    ratePerHour: RATE_PER_HOUR,
+    duration: DURATION,
+    rampTime: RAMP_TIME,
+    preAllocatedVUs: PRE_ALLOCATED_VUS,
+    maxVUs: MAX_VUS,
+    gracefulStop: "10s",
+    generateStages,
+  }),
   summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", `p(${THRESHOLD_PERCENTILE})`],
   thresholds: {
     http_req_duration: [
@@ -129,7 +215,16 @@ export function setup() {
   if (OPAC_HOST_HEADER) {
     console.log(`OPAC_HOST_HEADER: ${OPAC_HOST_HEADER}`);
   }
-  console.log(`RESULTS_TO_CLICK: ${RESULTS_TO_CLICK}`);
+  console.log(`LOAD_MODEL: ${LOAD_MODEL}${RATE_PER_HOUR ? ` (${RATE_PER_HOUR} sessions/hour, ${DURATION} steady state)` : ""}`);
+  console.log(`SEARCH_TERMS: ${terms.length} entries (${SEARCH_TERMS_FILE || "words_alpha.txt"})`);
+  if (CALIBRATION_FILE) {
+    console.log(`CALIBRATION_FILE: ${CALIBRATION_FILE}${calibration ? "" : " (FAILED TO LOAD, using defaults)"}`);
+  }
+  if (clickThroughRate !== null) {
+    console.log(`CLICK_THROUGH_RATE: ${clickThroughRate}, DETAIL_VIEWS_PER_SEARCH: ${detailViewsPerSearch !== null ? detailViewsPerSearch : "(1 per clicking search)"}, BROWSE_PROBABILITY: ${browseProbability}`);
+  } else {
+    console.log(`RESULTS_TO_CLICK: ${RESULTS_TO_CLICK}`);
+  }
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
   console.log(`ABORT_MS: ${ABORT_MS} (abort test when p(${THRESHOLD_PERCENTILE}) exceeds this)`);
@@ -163,10 +258,19 @@ export default function () {
     __peakVUs = currentVUs;
   }
 
-  const searchTerm = randomElement(words);
+  // Unique per-iteration User-Agent so analyze-koha-logs.pl can reconstruct
+  // each synthetic session from the target's access log during validation
+  // (the client IP is always the load generator's)
+  const iterParams = Object.assign({}, opacParams, {
+    headers: Object.assign({}, opacHeaders, {
+      "User-Agent": `k6-stress-test/${exec.vu.idInTest}-${exec.vu.iterationInScenario}`,
+    }),
+  });
+
+  const searchTerm = weightedElement(terms);
 
   // OPAC homepage
-  const opacHomeRes = http.get(OPAC_URL, opacParams);
+  const opacHomeRes = http.get(OPAC_URL, iterParams);
   logRequestStatus(opacHomeRes, "OPAC homepage", currentVUs);
   check(opacHomeRes, {
     "OPAC homepage loaded": (r) => r.status === 200,
@@ -176,7 +280,7 @@ export default function () {
 
   // OPAC search
   const opacSearchUrl = `${OPAC_URL}/cgi-bin/koha/opac-search.pl?q=${encodeURIComponent(searchTerm)}`;
-  const opacSearchRes = http.get(opacSearchUrl, opacParams);
+  const opacSearchRes = http.get(opacSearchUrl, iterParams);
   logRequestStatus(opacSearchRes, `OPAC search "${searchTerm}"`, currentVUs);
   check(opacSearchRes, {
     "OPAC search completed": (r) => r.status === 200,
@@ -198,8 +302,8 @@ export default function () {
   });
 
   if (resultLinks.length > 0) {
-    const clickCount = Math.min(RESULTS_TO_CLICK, resultLinks.length);
-    
+    const clickCount = Math.min(sampleClickCount(), resultLinks.length);
+
     for (let i = 0; i < clickCount; i++) {
       const idx = Math.floor(Math.random() * resultLinks.length);
       let recordUrl = resultLinks[idx];
@@ -207,7 +311,7 @@ export default function () {
         recordUrl = `${OPAC_URL}${recordUrl}`;
       }
 
-      const recordRes = http.get(recordUrl, opacParams);
+      const recordRes = http.get(recordUrl, iterParams);
       logRequestStatus(recordRes, `OPAC record detail ${i + 1}/${clickCount}`, currentVUs);
       check(recordRes, {
         "OPAC record loaded": (r) => r.status === 200,
@@ -217,18 +321,21 @@ export default function () {
     }
   }
 
-  // Browse by subject (common OPAC action)
-  const browseUrl = `${OPAC_URL}/cgi-bin/koha/opac-search.pl?idx=su&q=${encodeURIComponent(searchTerm)}`;
-  const browseRes = http.get(browseUrl, opacParams);
-  logRequestStatus(browseRes, `OPAC subject browse "${searchTerm}"`, currentVUs);
-  check(browseRes, {
-    "OPAC subject browse completed": (r) => r.status === 200,
-  });
+  // Browse by subject (common OPAC action). With calibration loaded this is
+  // gated by the measured paging rate so searches per session match reality.
+  if (Math.random() < browseProbability) {
+    const browseUrl = `${OPAC_URL}/cgi-bin/koha/opac-search.pl?idx=su&q=${encodeURIComponent(searchTerm)}`;
+    const browseRes = http.get(browseUrl, iterParams);
+    logRequestStatus(browseRes, `OPAC subject browse "${searchTerm}"`, currentVUs);
+    check(browseRes, {
+      "OPAC subject browse completed": (r) => r.status === 200,
+    });
 
-  thinkTime(3);
+    thinkTime(3);
+  }
 
   // Advanced search page
-  const advSearchRes = http.get(`${OPAC_URL}/cgi-bin/koha/opac-search.pl`, opacParams);
+  const advSearchRes = http.get(`${OPAC_URL}/cgi-bin/koha/opac-search.pl`, iterParams);
   logRequestStatus(advSearchRes, "OPAC advanced search page", currentVUs);
   check(advSearchRes, {
     "OPAC advanced search page loaded": (r) => r.status === 200,
@@ -257,6 +364,11 @@ export function handleSummary(data) {
     config: {
       opacUrl: OPAC_URL,
       opacHostHeader: OPAC_HOST_HEADER || "(not set)",
+      loadModel: LOAD_MODEL,
+      sessionsPerHour: RATE_PER_HOUR || null,
+      searchTermsFile: SEARCH_TERMS_FILE || "(words_alpha.txt)",
+      calibrationFile: CALIBRATION_FILE || "(not set)",
+      clickThroughRate: clickThroughRate !== null ? clickThroughRate : "(legacy RESULTS_TO_CLICK)",
       resultsToClick: RESULTS_TO_CLICK,
       thinkTime: THINK_TIME_DISABLED ? "disabled" : (THINK_TIME_FIXED !== null ? `${THINK_TIME_FIXED}s` : "random"),
       maxVUs: MAX_VUS,
