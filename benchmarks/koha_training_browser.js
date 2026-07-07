@@ -117,6 +117,11 @@ const EXTERNAL_SERVICE_TOKEN_SECRET = __ENV.EXTERNAL_SERVICE_TOKEN_SECRET || "x-
 const CLOUD_TEST_NAME = __ENV.CLOUD_TEST_NAME || "koha-training-session";
 const CLOUD_PROJECT_ID = __ENV.CLOUD_PROJECT_ID || "";
 
+// Optional load zones for cloud-executed runs, comma-separated with
+// percents totalling 100, e.g. 'amazon:us:ashburn:50,amazon:us:columbus:50'.
+// Default: the stack's home zone.
+const CLOUD_ZONES = __ENV.CLOUD_ZONES || "";
+
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
 
@@ -164,9 +169,22 @@ const cloudConfig = { name: CLOUD_TEST_NAME };
 if (CLOUD_PROJECT_ID) {
   cloudConfig.projectID = parseInt(CLOUD_PROJECT_ID);
 }
+if (CLOUD_ZONES) {
+  const distribution = {};
+  for (const entry of CLOUD_ZONES.split(",")) {
+    const parts = entry.trim().split(":");
+    const percent = parseInt(parts.pop());
+    const zone = parts.join(":");
+    distribution[zone.replace(/[^a-zA-Z0-9]+/g, "_")] = { loadZone: zone, percent: percent };
+  }
+  cloudConfig.distribution = distribution;
+}
 
 export const options = {
   cloud: cloudConfig,
+  // Setup screens existing records via many sequential REST calls; at large
+  // LIBRARIANS this exceeds k6's default 60s, so make it generous
+  setupTimeout: `${parseInt(__ENV.SETUP_TIMEOUT_S) || 600}s`,
   scenarios: {
     training: {
       executor: "per-vu-iterations",
