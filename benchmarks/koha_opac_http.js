@@ -15,8 +15,56 @@ import { parseHTML } from "k6/html";
 import { SharedArray } from "k6/data";
 import exec from "k6/execution";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
-import * as reporting from "./lib/reporting.js";
-import { weightedElement, sampleQuantiles, buildLoadOptions } from "./lib/utils.js";
+// Inlined from lib/utils.js so this file is single-file and can be pasted
+// into the Grafana Cloud script editor ( where its variables are editable and
+// it re-runs from the web UI ).
+function weightedElement(cumArr) {
+  const r = Math.random() * cumArr[cumArr.length - 1].c;
+  let lo = 0;
+  let hi = cumArr.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (cumArr[mid].c <= r) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return cumArr[lo].t;
+}
+function sampleQuantiles(q) {
+  const u = Math.random() * (q.length - 1);
+  const i = Math.floor(u);
+  const f = u - i;
+  return i + 1 < q.length ? q[i] + f * (q[i + 1] - q[i]) : q[i];
+}
+function buildLoadOptions(opts) {
+  const { ratePerHour, duration, rampTime, preAllocatedVUs, maxVUs, gracefulStop, generateStages } = opts;
+  if (!ratePerHour) {
+    return { gracefulStop, stages: generateStages() };
+  }
+  const rate = Math.max(1, Math.round(ratePerHour));
+  // Little's law estimate: concurrent sessions = rate x mean session length
+  // (~90s), padded 1.5x. Tune via PRE_ALLOCATED_VUS if dropped_iterations > 0.
+  const pool = preAllocatedVUs || Math.ceil((rate / 3600) * 90 * 1.5);
+  return {
+    scenarios: {
+      open_model: {
+        executor: "ramping-arrival-rate",
+        startRate: 0,
+        timeUnit: "1h",
+        stages: [
+          { duration: rampTime, target: rate },
+          { duration: duration, target: rate },
+          { duration: rampTime, target: 0 },
+        ],
+        preAllocatedVUs: pool,
+        maxVUs: Math.max(pool, maxVUs || pool),
+        gracefulStop,
+      },
+    },
+  };
+}
 
 // ------------------------------------------------------------
 // ENVIRONMENT VARIABLES
@@ -398,16 +446,32 @@ export default function () {
   thinkTime(2);
 }
 
+// Self-contained summary ( lib/reporting.js is not imported, so the file stays
+// single-file for the script editor ). handleSummary does not run on Grafana
+// Cloud anyway; this covers local runs. The rich terminal formatter that used
+// to live in reporting.js is dropped - k6's built-in textSummary carries the
+// percentiles and rates, and the JSON below carries the config and checks.
 export function handleSummary(data) {
   const m = data.metrics;
-  const abortReason = reporting.getAbortReason(data, {
-    thresholdPercentile: THRESHOLD_PERCENTILE,
-    abortMs: ABORT_MS,
-    maxFailRate: MAX_FAIL_CON_RATE,
-    peakVUs: __peakVUs,
-    maxVUs: MAX_VUS,
-  });
-  const { totalRequests, testDuration, rps } = reporting.calculateDerivedMetrics(data);
+  const dur = m.http_req_duration ? m.http_req_duration.values : {};
+  const pKey = `p(${THRESHOLD_PERCENTILE})`;
+  const totalRequests = m.http_reqs?.values?.count || 0;
+  const rps = m.http_reqs?.values?.rate?.toFixed(2) || null;
+  const testDuration = rps && parseFloat(rps) > 0
+    ? totalRequests / parseFloat(rps)
+    : (data.state?.testRunDurationMs ? data.state.testRunDurationMs / 1000 : 0);
+
+  const checks = {};
+  if (data.root_group?.checks) {
+    for (const c of data.root_group.checks) {
+      const total = c.passes + c.fails;
+      checks[c.name] = {
+        passes: c.passes,
+        fails: c.fails,
+        rate: total > 0 ? `${((c.passes / total) * 100).toFixed(1)}%` : "N/A",
+      };
+    }
+  }
 
   const summary = {
     metadata: {
@@ -450,19 +514,23 @@ export function handleSummary(data) {
       totalRequests: totalRequests,
       totalIterations: m.iterations?.values?.count || 0,
       failureRate: `${((m.http_req_failed?.values?.rate || 0) * 100).toFixed(2)}%`,
-      abortReason: abortReason,
     },
-    timing: reporting.buildTimingSection(m, THRESHOLD_PERCENTILE),
-    timingBreakdown: reporting.buildTimingBreakdown(m),
-    dataTransfer: reporting.buildDataTransfer(m),
-    checks: reporting.extractChecks(data),
+    timing_ms: {
+      med: dur.med != null ? dur.med.toFixed(0) : null,
+      p90: dur["p(90)"] != null ? dur["p(90)"].toFixed(0) : null,
+      [pKey]: dur[pKey] != null ? dur[pKey].toFixed(0) : null,
+      max: dur.max != null ? dur.max.toFixed(0) : null,
+    },
+    checks: checks,
   };
 
-  const outputPath = OUTPUT_FILE || reporting.generateOutputPath("koha-opac", TEST_NUMBER);
-  const customSummary = reporting.formatSummary(data, { peakVUs: __peakVUs, thresholdPercentile: THRESHOLD_PERCENTILE }) + `  Output: ${outputPath}\n`;
+  const now = new Date();
+  const outputDir = __ENV.OUTPUT_DIR || "/output";
+  const outputPath = OUTPUT_FILE ||
+    `${outputDir}/koha-opac-${TEST_NUMBER}-${now.toISOString().slice(0, 10).replace(/-/g, "")}-${now.toISOString().slice(11, 16).replace(/:/g, "")}.json`;
 
   return {
-    stdout: textSummary(data, { indent: "  ", enableColors: true }) + "\n" + customSummary,
+    stdout: textSummary(data, { indent: "  ", enableColors: true }) + `\n  Output: ${outputPath}\n`,
     [outputPath]: JSON.stringify(summary, null, 2),
   };
 }
