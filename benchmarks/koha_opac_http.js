@@ -24,6 +24,12 @@ import { weightedElement, sampleQuantiles, buildLoadOptions } from "./lib/utils.
 const OPAC_URL = __ENV.OPAC_URL || "https://kohadev.localhost";
 const OPAC_HOST_HEADER = __ENV.OPAC_HOST_HEADER || "";
 
+// Extra header sent on every request, e.g. to skip a restricted ingress
+// (Cloudflare bot rules). Required even from residential IPs on some
+// deployments. Value from EXTERNAL_SERVICE_TOKEN.
+const EXTERNAL_SERVICE_HEADER = __ENV.EXTERNAL_SERVICE_HEADER || "x-grafana-cloud-external-service";
+const EXTERNAL_SERVICE_TOKEN = __ENV.EXTERNAL_SERVICE_TOKEN || "";
+
 // Staged load test parameters
 const MAX_VUS = parseInt(__ENV.MAX_VUS) || 150;
 const VU_STEP = parseInt(__ENV.VU_STEP) || 10;
@@ -143,6 +149,9 @@ const opacHeaders = {
 };
 if (OPAC_HOST_HEADER) {
   opacHeaders["Host"] = OPAC_HOST_HEADER;
+}
+if (EXTERNAL_SERVICE_TOKEN) {
+  opacHeaders[EXTERNAL_SERVICE_HEADER] = EXTERNAL_SERVICE_TOKEN;
 }
 
 const opacParams = {
