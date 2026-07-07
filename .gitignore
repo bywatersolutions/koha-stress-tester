@@ -42,3 +42,12 @@ inc/
 # Test output (keep directory, ignore results)
 output/*
 !output/.gitkeep
+
+# Calibration data extracted from real logs (may contain patron search PII);
+# keep only the committed examples
+benchmarks/data/*
+!benchmarks/data/*.example.json
+
+# Failure screenshots from browser tests (saved relative to the run cwd)
+benchmarks/*.png
+training_*.png

@@ -135,10 +135,50 @@ HARD_TIMEOUT=30m
 HOLD_ON_FAIL=30s
 
 # Think time between actions (HTTP mode scripts)
-#   (blank)  = random delays (realistic user simulation)
+#   (blank)  = random delays (realistic user simulation), or the measured
+#              distribution when CALIBRATION_FILE is set (see below)
 #   off      = no delays (maximum request rate)
 #   2        = fixed 2-second delay (or any number)
 THINK_TIME=
+
+# ============================================================
+# Calibrated / Open-Model Parameters (koha_opac_http.js,
+# koha_workflow_http.js) - see docs/CALIBRATION.md
+# ============================================================
+# All optional. Unset = legacy staged closed-model behavior above.
+# Generate the data files with bin/analyze-koha-logs.pl from production
+# Apache logs; they must live under benchmarks/ (paths are relative to it)
+# and are gitignored because real search terms can contain patron PII.
+
+# Weighted real search terms (koha_opac_http.js)
+#SEARCH_TERMS_FILE=data/search_terms.json
+
+# Measured think times, click-through rate, paging rate (koha_opac_http.js)
+#CALIBRATION_FILE=data/calibration.json
+
+# Open model: sessions arrive at this hourly rate regardless of server
+# speed (ramping-arrival-rate executor) instead of the staged VU ramp.
+# Use arrival.sessions_per_hour from calibration.json
+#SESSIONS_PER_HOUR=
+
+# Expert override: iterations per SECOND (wins over SESSIONS_PER_HOUR)
+#ARRIVAL_RATE=
+
+# Steady-state duration at the target rate (open model only)
+#DURATION=60m
+
+# Open-model VU pool; 0 = auto-estimate from the rate. Raise if k6 reports
+# dropped_iterations while latencies are still healthy.
+#PRE_ALLOCATED_VUS=0
+
+# Probabilistic click-through overrides (else taken from CALIBRATION_FILE)
+#CLICK_THROUGH_RATE=
+#DETAIL_VIEWS_PER_SEARCH=
+
+# Staff circulation arrival rate (koha_workflow_http.js): one iteration is
+# one checkout + checkin, so use the peak-hour checkout count from the
+# Koha statistics table
+#WORKFLOW_RATE_PER_HOUR=
 
 # Connection reuse behavior (HTTP mode scripts)
 # By default, each VU reuses connections (HTTP keep-alive) across all requests,

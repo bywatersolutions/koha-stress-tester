@@ -34,6 +34,7 @@ This tool simulates many users hitting your catalog simultaneously to measure pe
 | `solr_http.js`     | HTTP    | Docker or k6 | Direct Solr query stress test           |
 | `aspen_browser.js` | Browser | k6 only      | Aspen Discovery with real browser       |
 | `koha.js`          | Browser | k6 only      | Koha ILS staff interface (template)     |
+| `koha_training_browser.js` | Browser | k6 or Grafana Cloud | N librarians in lockstep - training-session certification |
 
 **HTTP tests** are the primary focus - they can simulate hundreds of concurrent users and run in Docker.  
 **Browser tests** require the k6 binary installed locally (not Docker).
@@ -131,6 +132,8 @@ Pre-configured templates in `env-templates/` for common scenarios:
 | `saturation.env`  | ~25 min   | 150     | Gradual ramp to find breaking point                 |
 | `soak.env`        | 2-4 hours | 50      | Extended run to find memory leaks, stability issues |
 | `firestarter.env` | ~10 min   | 300     | Aggressive spike - DoS simulation                   |
+| `realistic.env`   | ~70 min   | (rate)  | Calibrated real-usage replay (open model)           |
+| `training.env`    | ~12 min   | 75 browsers | Training-class lockstep certification (Koha staff client) |
 
 ### Recommended Order
 
@@ -138,6 +141,41 @@ Pre-configured templates in `env-templates/` for common scenarios:
 2. **Baseline** - Capture normal response times
 3. **Saturation** - Find where performance degrades
 4. **Soak** - Confirm stability under sustained load
+
+## Modeling Real Usage (Koha)
+
+The profiles above answer "when does it break". To answer "will it handle
+*our* actual traffic", the Koha scripts can replay a workload measured from
+production instead of a synthetic one:
+
+1. Run `bin/analyze-koha-logs.pl` on production Apache access logs. It emits
+   a calibration JSON (arrival rates, session behavior, think-time
+   distribution) and a weighted list of real patron search terms.
+2. Copy both files into `benchmarks/data/` (gitignored - real search terms
+   can contain patron PII) and start from `env-templates/realistic.env`.
+3. With `SESSIONS_PER_HOUR` set, `koha_opac_http.js` switches from the staged
+   VU ramp to an arrival-rate model: sessions start at the measured hourly
+   rate whether or not the server keeps up, searching real terms at their
+   real frequencies with measured think times and click-through rates.
+4. Validate by running the analyzer on the staging server's access log during
+   the test and comparing against production with `--compare`.
+
+See [docs/CALIBRATION.md](docs/CALIBRATION.md) for the full
+measure-calibrate-validate runbook, including the Koha database SQL for
+calibrating the staff-side circulation rate.
+
+## Certifying Training Sessions (Koha)
+
+`koha_training_browser.js` simulates a training class: N real Chromium
+browsers all doing the same staff-client exercise at the same moment
+(login, checkout, checkin, catalog search, a deliberate hold collision),
+paced by a shared trainer clock. It selects existing patrons and items
+rather than creating records - the only state it produces is checkouts and
+holds, which it puts back afterward. Start from `env-templates/training.env`
+and run at scale from Grafana Cloud with
+`./bin/run-with-env.sh --cloud`. See [docs/TRAINING.md](docs/TRAINING.md)
+for the full runbook, including Grafana Cloud setup (secrets, projects,
+per-employee tokens) and cleanup semantics.
 
 ## Configuration
 
