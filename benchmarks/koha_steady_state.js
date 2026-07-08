@@ -1,5 +1,5 @@
 /**
- * Koha Steady-State Combined Test ( daily operations )
+ * koha_steady_state.js - Koha Steady-State Combined Test ( daily operations )
  *
  * Post-go-live, the staff interface and the patron catalog share one
  * Starman/Plack worker pool. This test runs both loads at once, as independent

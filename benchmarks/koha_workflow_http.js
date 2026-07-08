@@ -1,5 +1,5 @@
 /**
- * Koha Workflow HTTP Stress Test
+ * koha_workflow_http.js - Koha Workflow HTTP Stress Test
  * 
  * Tests Koha with a complete librarian workflow under staged load.
  * Uses HTTP/REST API only (no browser) for higher throughput than browser tests.

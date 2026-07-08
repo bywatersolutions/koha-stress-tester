@@ -1,3 +1,9 @@
+/**
+ * solr_http.js - Solr Cloud query stress test
+ *
+ * Sends queries directly to a Solr Cloud core (the search backend behind Aspen
+ * Discovery), HTTP only.
+ */
 import http from "k6/http";
 import { check, sleep } from "k6";
 import { SharedArray } from "k6/data";

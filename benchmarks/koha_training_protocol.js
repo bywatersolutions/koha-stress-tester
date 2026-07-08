@@ -1,5 +1,5 @@
 /**
- * Koha Training Session Protocol Test
+ * koha_training_protocol.js - Koha Training Session Protocol Test
  *
  * The HTTP-level twin of koha_training_browser.js. It drives the same staff-
  * client curriculum ( login, patron search, checkout, checkin, catalog

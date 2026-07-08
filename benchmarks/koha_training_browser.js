@@ -1,5 +1,5 @@
 /**
- * Koha Training Session Browser Test
+ * koha_training_browser.js - Koha Training Session Browser Test
  *
  * Simulates a training class: LIBRARIANS people all doing the same staff-client
  * exercise at the same time, each in their own real Chromium browser. The load

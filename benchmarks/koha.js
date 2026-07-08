@@ -1,5 +1,5 @@
 /**
- * Koha ILS Browser Test
+ * koha.js - Koha ILS Browser Test
  * 
  * Requirements:
  * - k6 binary with browser support (not Docker)

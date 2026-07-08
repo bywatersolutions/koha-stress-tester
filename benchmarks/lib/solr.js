@@ -1,3 +1,5 @@
+// lib/solr.js - Solr request helpers ( auth headers, query building ) imported
+// by solr_http.js.
 import http from "k6/http";
 import encoding from "k6/encoding";
 

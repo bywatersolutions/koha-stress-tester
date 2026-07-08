@@ -1,3 +1,6 @@
+// lib/reporting.js - summary/metrics formatting helpers imported by the k6
+// benchmark scripts.
+
 /**
  * Format a summary for console output
  * @param {Object} data - k6 summary data

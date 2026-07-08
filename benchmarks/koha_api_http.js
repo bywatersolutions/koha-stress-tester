@@ -1,5 +1,5 @@
 /**
- * Koha REST API Read-Only Stress Test
+ * koha_api_http.js - Koha REST API Read-Only Stress Test
  * 
  * Tests Koha REST API under staged load with read-only queries.
  * Uses HTTP requests only (no browser) for high-volume stress testing.

@@ -1,3 +1,6 @@
+// lib/utils.js - shared helpers ( random/weighted sampling, load-option
+// builders ) imported by the k6 benchmark scripts.
+
 /**
  * Randomly selects an element from an array
  * @param {Array} arr - The array to pick an element from

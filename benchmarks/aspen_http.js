@@ -1,3 +1,8 @@
+/**
+ * aspen_http.js - Aspen Discovery HTTP Stress Test
+ *
+ * Tests an Aspen Discovery front-end under staged load, HTTP only (no browser).
+ */
 import http from "k6/http";
 import { sleep, check } from "k6";
 import { parseHTML } from "k6/html";

@@ -1,5 +1,5 @@
 /**
- * Aspen Discovery Browser Test
+ * aspen_browser.js - Aspen Discovery Browser Test
  * 
  * Requirements:
  * - k6 binary with browser support (not Docker)
