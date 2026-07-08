@@ -43,16 +43,38 @@ Cloudflare on ByWater-hosted servers. Two org-level secrets back these:
 
 The target server also needs **RESTBasicAuth** enabled for the login tests.
 
+## Standing up a whole new project
+
+To give a partner or engagement its own project, pre-filled with all four
+templates, one command does it — no clicking, no pasting:
+
+```bash
+./bin/new-cloud-project.pl "Partner X - Stress Tests"
+```
+
+It discovers your org, creates the project, populates the four tests, and
+prints the project link. Share that link; people run tests from there exactly
+as above (clone → edit `<<< SET` → Run). Secrets are org-wide, so the new
+project inherits `staff-pass` and the ingress token automatically.
+
+VU limits are the one thing the API can't set (it's an admin/plan action) — if
+a big run (e.g. the OPAC peak) needs more than the project default, raise them
+in the project's settings in the UI.
+
 ## Maintainers: updating the templates
 
 The templates are generated from `benchmarks/*.js` in this repo. When the code
 changes, push the update with:
 
 ```bash
-./bin/sync-cloud-tests.sh          # create/update all four, in place
-./bin/sync-cloud-tests.sh --dry-run
+./bin/sync-cloud-tests.pl          # create/update all four, in place
+./bin/sync-cloud-tests.pl --dry-run
+./bin/sync-cloud-tests.pl --project <ID>   # target another project
 ```
 
 It talks to the k6 Cloud REST API (reusing your `k6 cloud login` token) and
 updates each test's script by name — it never touches clones people have made.
-See the script header for `--project` / `--env` / filter options.
+See the script header for `--env` / filter options.
+
+Both scripts just need `k6 cloud login --token <token>` done once (token from
+the k6 app).
