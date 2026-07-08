@@ -1,26 +1,24 @@
 #!/bin/bash
-# Sync the benchmark scripts up to Grafana Cloud as CLI-managed k6 tests.
+# Push the benchmark scripts up to Grafana Cloud as SCRIPT-EDITOR tests, so
+# other people can run them from the web UI against any server: they open a
+# test, clone it ( Save as… ), edit the values marked "<<< SET" at the top of
+# the script, and click Run.
 #
-# Each script edit in benchmarks/*.js can be pushed to its cloud test with one
-# command, instead of re-pasting into the web script editor. 'k6 cloud upload'
-# keys a test by (project, name): re-uploading the same name updates that test
-# in place, so running this repeatedly keeps the cloud copy in lockstep with
-# the repo.
-#
-# IMPORTANT: this only works for tests that were CREATED BY THE CLI. A test
-# created in the web editor ("in the App") rejects archive uploads with
-#   (400/E2) Archive upload is not allowed for test created in the App
-# so a colliding App test must be deleted in the GUI first (see --help).
+# These are script-editor tests ( the script text lives in the test and is
+# editable/clonable in the browser ), NOT CLI archive tests - so this uses the
+# k6 Cloud REST API to create/update each test's script, keyed by
+# ( project, name ). Re-running updates the script in place; it never touches
+# a clone someone made.
 #
 # Usage:
-#   ./bin/sync-cloud-tests.sh                 # sync all tests, config from .env
-#   ./bin/sync-cloud-tests.sh --dry-run       # print the k6 commands, run nothing
-#   ./bin/sync-cloud-tests.sh --env prod.env  # use a different config file
-#   ./bin/sync-cloud-tests.sh opac steady     # only tests whose script/name matches
+#   ./bin/sync-cloud-tests.sh                 # create/update all templates
+#   ./bin/sync-cloud-tests.sh --dry-run       # show what would change, do nothing
+#   ./bin/sync-cloud-tests.sh opac daily      # only tests whose script/name matches
 #   ./bin/sync-cloud-tests.sh --project 12345 # override CLOUD_PROJECT_ID
+#   ./bin/sync-cloud-tests.sh --env prod.env  # read CLOUD_PROJECT_ID from another file
 #
-# Needs 'k6 cloud login --token <token>' once first (token from the Grafana
-# Cloud k6 app, e.g. https://bws.grafana.net/a/k6-app).
+# Auth: reuses the token from 'k6 cloud login' ( ~/Library/Application Support/
+# k6/config.json ). Run that once first.
 
 set -e
 
@@ -28,8 +26,7 @@ SCRIPT_DIR="$(dirname "$0")"
 PROJECT_DIR="$SCRIPT_DIR/.."
 BENCH_DIR="$PROJECT_DIR/benchmarks"
 
-# script file | cloud test name. Uploading with these names updates the
-# matching CLI-managed test in place. Edit this table to add/rename tests.
+# script file | cloud test name. These names are the templates people clone.
 SYNC_TESTS=(
     "koha_opac_http.js|OPAC Stress Test - HTTP Only"
     "koha_steady_state.js|Daily Operations"
@@ -37,16 +34,12 @@ SYNC_TESTS=(
     "koha_training_browser.js|Training Simulation - End to End"
 )
 
-# Defaults, overridable by flags
 ENV_FILE="$PROJECT_DIR/.env"
 PROJECT_OVERRIDE=""
 DRY_RUN=""
 FILTERS=()
 
-usage() {
-    sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
-    exit "${1:-0}"
-}
+usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -59,126 +52,109 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [ ! -f "$ENV_FILE" ]; then
-    echo "Error: env file not found: $ENV_FILE" >&2
-    echo "Copy env-templates/steady-state.env (or another) to .env and configure it." >&2
-    exit 1
-fi
-
-# Read all non-comment, non-empty lines from the env file into 'KEY=value'
-# entries. Plain indexed array + lookup helper, because macOS ships bash 3.2
-# which has no associative arrays. (Same parser as run-with-env.sh.)
-ENV_LINES=()
-while IFS='=' read -r key value; do
-    [[ "$key" =~ ^[[:space:]]*# ]] && continue
-    [[ -z "$key" ]] && continue
-    key=$(echo "$key" | xargs)
-    value="${value%\"}"; value="${value#\"}"
-    value="${value%\'}"; value="${value#\'}"
-    ENV_LINES+=("$key=$value")
-done < "$ENV_FILE"
-
-env_val() {
-    local entry
-    for entry in "${ENV_LINES[@]}"; do
-        if [[ "${entry%%=*}" == "$1" ]]; then echo "${entry#*=}"; return; fi
-    done
-    echo "$2"
-}
-
-# Resolve the project id: --project wins, else CLOUD_PROJECT_ID from the env file
+# Project id: --project wins, else CLOUD_PROJECT_ID from the env file
 PROJECT_ID="$PROJECT_OVERRIDE"
-[ -z "$PROJECT_ID" ] && PROJECT_ID="$(env_val CLOUD_PROJECT_ID)"
+if [ -z "$PROJECT_ID" ] && [ -f "$ENV_FILE" ]; then
+    PROJECT_ID=$(grep -E '^[[:space:]]*CLOUD_PROJECT_ID[[:space:]]*=' "$ENV_FILE" | head -1 | cut -d= -f2- | xargs)
+fi
 if [ -z "$PROJECT_ID" ]; then
     echo "Error: no project id. Set CLOUD_PROJECT_ID in $ENV_FILE or pass --project <id>." >&2
     exit 1
 fi
 
-# True if the entry matches one of the positional filters (script or name
-# substring). No filters given => everything matches.
-matches_filter() {
-    [ ${#FILTERS[@]} -eq 0 ] && return 0
-    local hay="$1" f
-    for f in "${FILTERS[@]}"; do
-        [[ "$hay" == *"$f"* ]] && return 0
-    done
-    return 1
-}
+# The k6 CLI stores its cloud token here after 'k6 cloud login'.
+K6_CONFIG="$HOME/Library/Application Support/k6/config.json"
+if [ ! -f "$K6_CONFIG" ]; then
+    echo "Error: k6 config not found at $K6_CONFIG - run 'k6 cloud login --token <token>' first." >&2
+    exit 1
+fi
 
-echo "=========================================="
-echo "Syncing cloud tests  (project $PROJECT_ID)"
-echo "  config: $ENV_FILE"
-[ -n "$DRY_RUN" ] && echo "  DRY RUN - nothing will be uploaded"
-echo "=========================================="
-
-fail_count=0
-done_count=0
-
+# Build a newline-separated "file<TAB>name" list, applying any positional
+# filters ( substring match against either field ), and hand it to python for
+# the REST work ( JSON assembly + create/update is far cleaner there ).
+selected=""
 for entry in "${SYNC_TESTS[@]}"; do
-    script="${entry%%|*}"
-    name="${entry#*|}"
-
-    matches_filter "$script|$name" || continue
-
-    script_path="$BENCH_DIR/$script"
-    if [ ! -f "$script_path" ]; then
-        echo ">> SKIP  $name  (script not found: $script)"
-        fail_count=$((fail_count + 1))
-        continue
+    file="${entry%%|*}"; name="${entry#*|}"
+    if [ ${#FILTERS[@]} -gt 0 ]; then
+        keep=""
+        for f in "${FILTERS[@]}"; do
+            case "$file|$name" in *"$f"*) keep=1 ;; esac
+        done
+        [ -z "$keep" ] && continue
     fi
-
-    # Build -e flags from every env var, forcing the per-test name and project.
-    K6_ARGS=()
-    for e in "${ENV_LINES[@]}"; do
-        k="${e%%=*}"; v="${e#*=}"
-        case "$k" in
-            UID|GID|K6_IMAGE_TAG|BENCH|OUTPUT_DIR|TEST_NUMBER) continue ;;
-            CLOUD_TEST_NAME|CLOUD_PROJECT_ID) continue ;;  # forced below
-            # Cloud runs read these from Grafana secrets (named by
-            # EXTERNAL_SERVICE_TOKEN_SECRET / STAFF_PASS_SECRET), so keep the raw
-            # token and password out of the uploaded archive. Requires the
-            # 'x-grafana-cloud-external-service-token' and 'staff-pass' secrets
-            # to exist in the project.
-            EXTERNAL_SERVICE_TOKEN|STAFF_PASS) continue ;;
-        esac
-        [[ -z "$v" ]] && continue
-        K6_ARGS+=("-e" "$k=$v")
-    done
-    K6_ARGS+=("-e" "CLOUD_PROJECT_ID=$PROJECT_ID")
-    K6_ARGS+=("-e" "CLOUD_TEST_NAME=$name")
-
-    echo ""
-    echo ">> $name"
-    echo "   $script"
-
-    if [ -n "$DRY_RUN" ]; then
-        printf '   k6 cloud upload'
-        printf ' %q' "${K6_ARGS[@]}" "$script_path"
-        printf '\n'
-        done_count=$((done_count + 1))
-        continue
-    fi
-
-    # Capture output so we can surface the run URL or the App-collision error.
-    out="$(k6 cloud upload "${K6_ARGS[@]}" "$script_path" 2>&1)" || true
-    run_url="$(printf '%s\n' "$out" | sed -E 's/\x1b\[[0-9;]*m//g' | grep -oE 'https://[^ ]*/runs/[0-9]+' | head -1)"
-
-    if [ -n "$run_url" ]; then
-        echo "   OK  -> $run_url"
-        done_count=$((done_count + 1))
-    elif printf '%s' "$out" | grep -q 'not allowed for test created in the App'; then
-        echo "   FAILED  a test named '$name' already exists in the App (web editor)."
-        echo "           Delete it in the GUI, then re-run this script to create the"
-        echo "           CLI-managed replacement."
-        fail_count=$((fail_count + 1))
-    else
-        echo "   FAILED  $(printf '%s' "$out" | sed -E 's/\x1b\[[0-9;]*m//g' | grep -iE 'error|level=' | head -1)"
-        fail_count=$((fail_count + 1))
-    fi
+    selected+="${file}	${name}"$'\n'
 done
 
-echo ""
-echo "=========================================="
-echo "Done: $done_count synced, $fail_count failed"
-echo "=========================================="
-[ "$fail_count" -eq 0 ]
+SYNC_PROJECT_ID="$PROJECT_ID" \
+SYNC_DRY_RUN="$DRY_RUN" \
+SYNC_BENCH_DIR="$BENCH_DIR" \
+SYNC_K6_CONFIG="$K6_CONFIG" \
+SYNC_SELECTED="$selected" \
+python3 - <<'PY'
+import json, os, sys, urllib.request, urllib.error
+
+API = "https://api.k6.io/loadtests/v2/tests"
+project_id = int(os.environ["SYNC_PROJECT_ID"])
+dry = bool(os.environ.get("SYNC_DRY_RUN"))
+bench_dir = os.environ["SYNC_BENCH_DIR"]
+selected = [l.split("\t") for l in os.environ["SYNC_SELECTED"].splitlines() if l.strip()]
+
+with open(os.environ["SYNC_K6_CONFIG"]) as f:
+    token = json.load(f)["collectors"]["cloud"]["token"]
+HDRS = {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
+
+def call(method, url, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, headers=HDRS, method=method)
+    try:
+        with urllib.request.urlopen(req) as r:
+            raw = r.read()
+            return r.status, (json.loads(raw) if raw else None)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()[:200]
+
+# Existing tests in the project, name -> id
+status, listing = call("GET", f"{API}?project_id={project_id}&page_size=100")
+existing = {}
+if isinstance(listing, dict):
+    for t in (listing.get("k6-tests") or []):
+        tt = t.get("k6-test", t)
+        existing[tt.get("name")] = tt.get("id")
+
+print("=" * 42)
+print(f"Syncing script-editor templates  (project {project_id})")
+if dry:
+    print("  DRY RUN - nothing will be written")
+print("=" * 42)
+
+fails = 0
+for file, name in selected:
+    path = os.path.join(bench_dir, file)
+    if not os.path.exists(path):
+        print(f"\n>> SKIP  {name}  (script not found: {file})"); fails += 1; continue
+    with open(path) as fh:
+        script = fh.read()
+
+    tid = existing.get(name)
+    action = "update" if tid else "create"
+    print(f"\n>> {name}\n   {file}  ->  {action}" + (f" (id {tid})" if tid else ""))
+    if dry:
+        continue
+
+    if tid:
+        st, resp = call("PATCH", f"{API}/{tid}", {"script": script})
+    else:
+        st, resp = call("POST", API, {"name": name, "project_id": project_id, "script": script})
+        if st == 200 and isinstance(resp, dict):
+            tid = (resp.get("k6-test", resp) or {}).get("id")
+
+    if st == 200:
+        print(f"   OK  https://bws.grafana.net/a/k6-app/tests/{tid}")
+    else:
+        print(f"   FAILED  HTTP {st}: {resp}"); fails += 1
+
+print("\n" + "=" * 42)
+print(f"Done: {len(selected) - fails} synced, {fails} failed")
+print("=" * 42)
+sys.exit(1 if fails else 0)
+PY
