@@ -33,19 +33,21 @@ import { Trend, Rate } from "k6/metrics";
 import secrets from "k6/secrets";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 
-// ------------------------------------------------------------
-// ENVIRONMENT VARIABLES ( shared with koha_training_browser.js )
-// ------------------------------------------------------------
-const STAFF_URL = __ENV.STAFF_URL || "http://kohadev-intra.localhost";
+// ══════════════════════════════════════════════════════════════════════
+//  ▶ HOW TO RUN: clone this test ( Save as… ), set the values marked
+//    "<<< SET" below ( search the script for "<<< SET" ), then click Run.
+//    Needs a superlibrarian login on the target ( RESTBasicAuth enabled ).
+// ══════════════════════════════════════════════════════════════════════
+const STAFF_URL = __ENV.STAFF_URL || "http://kohadev-intra.localhost"; // <<< SET: staff interface URL of the server to test
 const STAFF_HOST_HEADER = __ENV.STAFF_HOST_HEADER || "";
 const [STAFF_PROTOCOL, STAFF_HOST] = STAFF_URL.split("://");
 const STAFF_BASE_URL = `${STAFF_PROTOCOL}://${STAFF_HOST}`;
-const STAFF_USER = __ENV.STAFF_USER || "koha";
+const STAFF_USER = __ENV.STAFF_USER || "koha"; // <<< SET: superlibrarian username
 
-const STAFF_PASS_ENV = __ENV.STAFF_PASS || "";
+const STAFF_PASS_ENV = __ENV.STAFF_PASS || ""; // <<< SET: superlibrarian password ( or leave "" to use the org 'staff-pass' secret )
 const STAFF_PASS_SECRET = __ENV.STAFF_PASS_SECRET || "staff-pass";
 
-const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75;
+const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75; // <<< SET: how many attendees ( concurrent logged-in staff )
 const STEP_INTERVAL_S = parseInt(__ENV.STEP_INTERVAL_S) || 90;
 const STEP_JITTER_S = parseFloat(__ENV.STEP_JITTER_S) || 5;
 const TYPING_JITTER_S = parseFloat(__ENV.TYPING_JITTER_S) || 15;
@@ -56,7 +58,7 @@ const STARTUP_GRACE_S = parseInt(__ENV.STARTUP_GRACE_S) || 15;
 const TRAINING_USER_PREFIX = __ENV.TRAINING_USER_PREFIX || "";
 const TRAINING_USER_PASS = __ENV.TRAINING_USER_PASS || "";
 
-const CATALOG_SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter";
+const CATALOG_SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter"; // <<< SET: a term with hits in the target catalog
 
 const LIBRARY_ID = __ENV.LIBRARY_ID || "";
 const PATRON_CATEGORY_ID = __ENV.PATRON_CATEGORY_ID || "";

@@ -67,10 +67,12 @@ function buildLoadOptions(opts) {
   };
 }
 
-// ------------------------------------------------------------
-// ENVIRONMENT VARIABLES
-// ------------------------------------------------------------
-const OPAC_URL = __ENV.OPAC_URL || "https://kohadev.localhost";
+// ══════════════════════════════════════════════════════════════════════
+//  ▶ HOW TO RUN: clone this test ( Save as… ), set the values marked
+//    "<<< SET" below ( search the script for "<<< SET" ), then click Run.
+//    The OPAC test is anonymous - no login needed.
+// ══════════════════════════════════════════════════════════════════════
+const OPAC_URL = __ENV.OPAC_URL || "https://kohadev.localhost"; // <<< SET: public catalog URL of the server to test
 const OPAC_HOST_HEADER = __ENV.OPAC_HOST_HEADER || "";
 
 // Extra header sent on every request, e.g. to skip a restricted ingress
@@ -127,7 +129,7 @@ const SEARCH_TERMS_FILE = __ENV.SEARCH_TERMS_FILE || "";
 // Open-model target: actual opac-search.pl requests per hour ( the number the
 // 12,929-peak requirement is stated in ). Converted to a session arrival rate
 // internally, since a session issues more than one search.
-const OPAC_SEARCHES_PER_HOUR = parseFloat(__ENV.OPAC_SEARCHES_PER_HOUR) || 0;
+const OPAC_SEARCHES_PER_HOUR = parseFloat(__ENV.OPAC_SEARCHES_PER_HOUR) || 0; // <<< SET: peak catalog searches/hour to sustain ( e.g. 12929 )
 const ARRIVAL_RATE = parseFloat(__ENV.ARRIVAL_RATE) || 0;
 const DURATION = __ENV.DURATION || "15m";
 const PRE_ALLOCATED_VUS = parseInt(__ENV.PRE_ALLOCATED_VUS) || 0;
