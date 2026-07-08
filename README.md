@@ -40,6 +40,15 @@ This tool simulates many users hitting your catalog simultaneously to measure pe
 **HTTP tests** are the primary focus - they can simulate hundreds of concurrent users and run in Docker.  
 **Browser tests** require the k6 binary installed locally (not Docker).
 
+## Running from Grafana Cloud (no local setup)
+
+The Koha tests are also published to Grafana Cloud as clone-and-run templates,
+so anyone can point them at any server from the browser - no local k6 needed.
+Open the [Koha Stress Tests project](https://bws.grafana.net/a/k6-app/projects/8020159),
+clone a test, edit the values marked `<<< SET` at the top of its script, and Run.
+See [docs/GRAFANA_CLOUD.md](docs/GRAFANA_CLOUD.md). Maintainers push script
+changes with `./bin/sync-cloud-tests.sh`.
+
 > **WARNING:** Do not run these tests blindly. Always review and configure the `.env` file before running. These scripts can generate significant load on target systems - ensure you have permission to test the target and understand the configured VU counts and durations.
 
 ## Quick Start (Docker) - HTTP Tests
