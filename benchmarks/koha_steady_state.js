@@ -33,6 +33,7 @@ import { parseHTML } from "k6/html";
 import exec from "k6/execution";
 import { b64encode } from "k6/encoding";
 import { Trend, Rate } from "k6/metrics";
+import secrets from "k6/secrets";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 
 // ------------------------------------------------------------
@@ -64,7 +65,18 @@ const PATRON_MAX_VUS = parseInt(__ENV.PATRON_MAX_VUS) || 0;
 const P95_MS = parseInt(__ENV.P95_MS) || 10000;
 
 const EXTERNAL_SERVICE_HEADER = __ENV.EXTERNAL_SERVICE_HEADER || "x-grafana-cloud-external-service";
+// Token from the EXTERNAL_SERVICE_TOKEN env var, or the Grafana Cloud secret
+// named EXTERNAL_SERVICE_TOKEN_SECRET on cloud runs ( write-only, redacted ).
 const EXTERNAL_SERVICE_TOKEN = __ENV.EXTERNAL_SERVICE_TOKEN || "";
+const EXTERNAL_SERVICE_TOKEN_SECRET = __ENV.EXTERNAL_SERVICE_TOKEN_SECRET || "x-grafana-cloud-external-service-token";
+// Resolved in setup() ( secrets.get is async ) and threaded through data to the
+// VU scenarios, which set it back into this per-VU module var before requesting.
+let RESOLVED_TOKEN = EXTERNAL_SERVICE_TOKEN;
+async function resolveToken() {
+  if (EXTERNAL_SERVICE_TOKEN) return EXTERNAL_SERVICE_TOKEN;
+  try { return await secrets.get(EXTERNAL_SERVICE_TOKEN_SECRET); }
+  catch (e) { return ""; }
+}
 
 const CLOUD_TEST_NAME = __ENV.CLOUD_TEST_NAME || "koha-steady-state";
 const CLOUD_PROJECT_ID = __ENV.CLOUD_PROJECT_ID || "";
@@ -171,7 +183,7 @@ export const options = {
 // ------------------------------------------------------------
 function baseHeaders(accept) {
   const h = { Accept: accept };
-  if (EXTERNAL_SERVICE_TOKEN) h[EXTERNAL_SERVICE_HEADER] = EXTERNAL_SERVICE_TOKEN;
+  if (RESOLVED_TOKEN) h[EXTERNAL_SERVICE_HEADER] = RESOLVED_TOKEN;
   return h;
 }
 function pageParams(contentType) {
@@ -209,7 +221,8 @@ function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 // ------------------------------------------------------------
 // SETUP - shared pools of patrons, items, biblios
 // ------------------------------------------------------------
-export function setup() {
+export async function setup() {
+  RESOLVED_TOKEN = await resolveToken();
   console.log("========================================");
   console.log("KOHA STEADY-STATE COMBINED TEST");
   console.log("========================================");
@@ -217,7 +230,7 @@ export function setup() {
   console.log(`PATRON_MODE: ${PATRON_MODE}${PATRON_MODE === "opac" ? ` (OPAC_URL ${OPAC_URL})` : " (Aspen REST API emulation)"}`);
   console.log(`staff:  ${staffRate} txn/hour (pool ${staffPool} workstations, each logs in once)`);
   console.log(`patron: ${patronRate} sessions/hour (pool ${patronPool})`);
-  console.log(`${EXTERNAL_SERVICE_HEADER}: ${EXTERNAL_SERVICE_TOKEN ? "set" : "not sent"}`);
+  console.log(`${EXTERNAL_SERVICE_HEADER}: ${RESOLVED_TOKEN ? `set (${EXTERNAL_SERVICE_TOKEN ? "from env" : "from Grafana Cloud secret"})` : "not sent"}`);
   console.log("========================================");
 
   const params = staffApiParams();
@@ -256,7 +269,7 @@ export function setup() {
   if (items.length < 5) throw new Error(`Need >=5 available items, found ${items.length}`);
 
   console.log(`Pools: ${patrons.length} patrons, ${items.length} items, ${biblioIds.size} biblios; staff branch ${staffBranch}`);
-  return { staffBranch, patrons, items, biblioIds: Array.from(biblioIds).slice(0, 40) };
+  return { staffBranch, patrons, items, biblioIds: Array.from(biblioIds).slice(0, 40), token: RESOLVED_TOKEN };
 }
 
 // ------------------------------------------------------------
@@ -283,6 +296,7 @@ function ensureStaffLogin(pp) {
 }
 
 export function staffTransaction(data) {
+  RESOLVED_TOKEN = data.token; // per-VU: adopt the token setup resolved
   const started = Date.now();
   let ok = true;
   const pp = pageParams();
@@ -361,6 +375,7 @@ function staffAction(action, data, pp) {
 // PATRON SESSION - aspen ( API ) or opac ( CGI )
 // ------------------------------------------------------------
 export function patronSession(data) {
+  RESOLVED_TOKEN = data.token; // per-VU: adopt the token setup resolved
   const started = Date.now();
   let ok = true;
   try {
@@ -423,6 +438,7 @@ function opacBrowse() {
 // TEARDOWN - return anything the circulation action left checked out
 // ------------------------------------------------------------
 export function teardown(data) {
+  RESOLVED_TOKEN = data.token;
   const params = staffApiParams();
   const stillOut = (item) => {
     const res = http.get(`${API}/checkouts?q=${jsonQ({ item_id: item.id })}`, params);
