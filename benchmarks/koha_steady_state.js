@@ -49,7 +49,7 @@ const STAFF_PASS = __ENV.STAFF_PASS || "koha";
 const API = `${STAFF_PROTOCOL}://${STAFF_HOST}/api/v1`;
 const CGI = `${STAFF_BASE_URL}/cgi-bin/koha`;
 
-const STAFF_TRANSACTIONS_PER_HOUR = parseFloat(__ENV.STAFF_TRANSACTIONS_PER_HOUR) || 500;
+const STAFF_TRANSACTIONS_PER_HOUR = parseFloat(__ENV.STAFF_TRANSACTIONS_PER_HOUR) || 1000;
 const PATRON_MODE = (__ENV.PATRON_MODE || "aspen").toLowerCase();
 const PATRON_SESSIONS_PER_HOUR = parseFloat(__ENV.PATRON_SESSIONS_PER_HOUR) || 2000;
 // opac mode: a session issues 2 searches, so its session rate = searches/2
@@ -58,7 +58,6 @@ const OPAC_SEARCHES_PER_HOUR = parseFloat(__ENV.OPAC_SEARCHES_PER_HOUR) || 0;
 const DURATION = __ENV.DURATION || "5m";
 const RAMP_TIME = __ENV.RAMP_TIME || "30s";
 const THINK_S = parseFloat(__ENV.THINK_S) || 1;
-const ACTIONS_PER_STAFF_LOGIN = parseInt(__ENV.ACTIONS_PER_STAFF_LOGIN) || 4;
 const STAFF_MAX_VUS = parseInt(__ENV.STAFF_MAX_VUS) || 0;
 const PATRON_MAX_VUS = parseInt(__ENV.PATRON_MAX_VUS) || 0;
 
@@ -216,7 +215,7 @@ export function setup() {
   console.log("========================================");
   console.log(`STAFF_URL: ${STAFF_URL}`);
   console.log(`PATRON_MODE: ${PATRON_MODE}${PATRON_MODE === "opac" ? ` (OPAC_URL ${OPAC_URL})` : " (Aspen REST API emulation)"}`);
-  console.log(`staff:  ${staffRate} txn/hour (pool ${staffPool}), ${ACTIONS_PER_STAFF_LOGIN} actions/login`);
+  console.log(`staff:  ${staffRate} txn/hour (pool ${staffPool} workstations, each logs in once)`);
   console.log(`patron: ${patronRate} sessions/hour (pool ${patronPool})`);
   console.log(`${EXTERNAL_SERVICE_HEADER}: ${EXTERNAL_SERVICE_TOKEN ? "set" : "not sent"}`);
   console.log("========================================");
@@ -261,31 +260,42 @@ export function setup() {
 }
 
 // ------------------------------------------------------------
-// STAFF TRANSACTION - login once, then a weighted action mix
+// STAFF TRANSACTION - one action per iteration on a persistent login
 // ------------------------------------------------------------
+// A VU models a workstation: it logs in ONCE ( real stations stay logged in to
+// one account all day, they don't re-auth per transaction ) and reuses the
+// session cookie across iterations. So logins scale with the number of active
+// workstations ( ~ the VU pool ), not with the transaction rate - matching the
+// logs, where mainpage.pl login is only ~3% of staff requests.
+let staffLoggedIn = false; // module-level = per-VU in k6
+
+function ensureStaffLogin(pp) {
+  if (staffLoggedIn) return true;
+  const form = http.get(`${CGI}/mainpage.pl`, pp);
+  const csrf = csrfFrom(form.body);
+  if (!csrf) return false;
+  const login = http.post(`${CGI}/mainpage.pl`, {
+    csrf_token: csrf, login_op: "cud-login", koha_login_context: "intranet",
+    login_userid: STAFF_USER, login_password: STAFF_PASS, branch: "",
+  }, pageParams("application/x-www-form-urlencoded"));
+  staffLoggedIn = login.status === 200 && login.body.includes("loggedinusername");
+  return staffLoggedIn;
+}
+
 export function staffTransaction(data) {
   const started = Date.now();
   let ok = true;
   const pp = pageParams();
   try {
-    const form = http.get(`${CGI}/mainpage.pl`, pp);
-    const csrf = csrfFrom(form.body);
-    if (!csrf) throw new Error("no csrf on login page");
-    const login = http.post(`${CGI}/mainpage.pl`, {
-      csrf_token: csrf, login_op: "cud-login", koha_login_context: "intranet",
-      login_userid: STAFF_USER, login_password: STAFF_PASS, branch: "",
-    }, pageParams("application/x-www-form-urlencoded"));
-    if (login.status !== 200 || !login.body.includes("loggedinusername")) {
-      throw new Error(`login not confirmed (${login.status})`);
-    }
-
-    for (let i = 0; i < ACTIONS_PER_STAFF_LOGIN; i++) {
+    if (!ensureStaffLogin(pp)) {
+      ok = false;
+    } else {
+      ok = staffAction(weightedStaffAction(), data, pp);
       sleep(THINK_S);
-      if (!staffAction(weightedStaffAction(), data, pp)) ok = false;
     }
-    http.get(`${CGI}/staff/logout.pl`, pp);
   } catch (e) {
     ok = false;
+    staffLoggedIn = false; // force re-login next iteration on any error
   } finally {
     staffDuration.add(Date.now() - started);
     staffFailed.add(!ok);
