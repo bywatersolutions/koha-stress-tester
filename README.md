@@ -35,6 +35,7 @@ This tool simulates many users hitting your catalog simultaneously to measure pe
 | `aspen_browser.js` | Browser | k6 only      | Aspen Discovery with real browser       |
 | `koha.js`          | Browser | k6 only      | Koha ILS staff interface (template)     |
 | `koha_training_browser.js` | Browser | k6 or Grafana Cloud | N librarians in lockstep - training-session certification |
+| `koha_steady_state.js` | HTTP | k6 or Grafana Cloud | Daily-ops: staff + patron ( Aspen or OPAC ) sharing the pool |
 
 **HTTP tests** are the primary focus - they can simulate hundreds of concurrent users and run in Docker.  
 **Browser tests** require the k6 binary installed locally (not Docker).
@@ -134,6 +135,7 @@ Pre-configured templates in `env-templates/` for common scenarios:
 | `firestarter.env` | ~10 min   | 300     | Aggressive spike - DoS simulation                   |
 | `realistic.env`   | ~70 min   | (rate)  | Calibrated real-usage replay (open model)           |
 | `training.env`    | ~12 min   | 75 browsers | Training-class lockstep certification (Koha staff client) |
+| `steady-state.env`| ~6 min    | (rate)  | Daily-ops: staff + patron load on the shared pool           |
 
 ### Recommended Order
 

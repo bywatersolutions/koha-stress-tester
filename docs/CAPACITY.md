@@ -94,6 +94,33 @@ run, not the lockstep test.
    ≈ `4 × cores`. PWPL at 8 cores → ~30; 16 cores + 32 workers → ~60; 20 cores
    → ~75.
 
+## Daily operations: the shared pool ( staff + patron together )
+
+Training is pre-go-live ( staff only ). In daily operations the staff interface
+and the public catalog **share the same worker pool**, so they contend.
+`koha_steady_state.js` runs both as concurrent arrival-rate streams and reports
+each side's per-request p95 separately, so you can find the sustainable combined
+operating point ( "the box sustains X staff txn/hr + Y patron sessions/hr at
+acceptable latency" ).
+
+The load shapes come from real access logs across **12 ByWater libraries**, not
+a guess:
+- **Staff** = a weighted write-heavy action mix: checkin ( `returns.pl` ~40% ),
+  checkout ( `circulation.pl` ~24% ), biblio detail ~13%, catalog search ~9%,
+  holds ~4%, cataloging ~3%, patron lookup ~3%. Checkin/checkout are real
+  writes; the action checks an item out and back in ( self-cleaning ), and
+  teardown force-returns any straggler.
+- **Patron** = `PATRON_MODE`: `aspen` ( default; 10/12 libraries front the
+  catalog with Aspen Discovery, so patron load is Aspen's Koha-API calls -
+  patron account plus the `checkouts/{id}/allows_renewal` polling that
+  dominates ) or `opac` ( direct Koha OPAC CGI browse - for the 2/12 libraries
+  like hccc/helm, and PWPL ).
+
+Method: hold one side at a realistic baseline and raise the other until either
+`http_req_duration{scenario:staff}` or `{scenario:patron}` p95 crosses the SLO
+or `dropped_iterations` appear. Because the whole point is that these share the
+pool, watch how adding patron load pushes up *staff* latency and vice versa.
+
 ## Sizing rule of thumb
 
 ```
