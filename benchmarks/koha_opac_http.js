@@ -1,9 +1,9 @@
 /**
- * Koha OPAC HTTP Stress Test
- * 
- * Tests Koha OPAC (patron-facing catalog) under staged load.
+ * koha_opac_http.js - Koha OPAC HTTP Stress Test
+ *
+ * Tests Koha OPAC (patron-facing catalog) under staged or arrival-rate load.
  * Uses HTTP requests only (no browser) for high-volume stress testing.
- * 
+ *
  * Endpoints tested:
  * - OPAC homepage
  * - OPAC search
@@ -14,6 +14,7 @@ import { sleep, check } from "k6";
 import { parseHTML } from "k6/html";
 import { SharedArray } from "k6/data";
 import exec from "k6/execution";
+import secrets from "k6/secrets";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 // Inlined from lib/utils.js so this file is single-file and can be pasted
 // into the Grafana Cloud script editor ( where its variables are editable and
@@ -74,9 +75,19 @@ const OPAC_HOST_HEADER = __ENV.OPAC_HOST_HEADER || "";
 
 // Extra header sent on every request, e.g. to skip a restricted ingress
 // (Cloudflare bot rules). Required even from residential IPs on some
-// deployments. Value from EXTERNAL_SERVICE_TOKEN.
+// deployments. Value from the EXTERNAL_SERVICE_TOKEN env var, or the Grafana
+// Cloud secret named EXTERNAL_SERVICE_TOKEN_SECRET on cloud runs.
 const EXTERNAL_SERVICE_HEADER = __ENV.EXTERNAL_SERVICE_HEADER || "x-grafana-cloud-external-service";
 const EXTERNAL_SERVICE_TOKEN = __ENV.EXTERNAL_SERVICE_TOKEN || "";
+const EXTERNAL_SERVICE_TOKEN_SECRET = __ENV.EXTERNAL_SERVICE_TOKEN_SECRET || "x-grafana-cloud-external-service-token";
+// Resolved in setup() ( secrets.get is async ), threaded to the VU via data,
+// and re-applied to opacHeaders per iteration.
+let RESOLVED_TOKEN = EXTERNAL_SERVICE_TOKEN;
+async function resolveToken() {
+  if (EXTERNAL_SERVICE_TOKEN) return EXTERNAL_SERVICE_TOKEN;
+  try { return await secrets.get(EXTERNAL_SERVICE_TOKEN_SECRET); }
+  catch (e) { return ""; }
+}
 
 // Staged load test parameters
 const MAX_VUS = parseInt(__ENV.MAX_VUS) || 150;
@@ -231,8 +242,8 @@ const opacHeaders = {
 if (OPAC_HOST_HEADER) {
   opacHeaders["Host"] = OPAC_HOST_HEADER;
 }
-if (EXTERNAL_SERVICE_TOKEN) {
-  opacHeaders[EXTERNAL_SERVICE_HEADER] = EXTERNAL_SERVICE_TOKEN;
+if (RESOLVED_TOKEN) {
+  opacHeaders[EXTERNAL_SERVICE_HEADER] = RESOLVED_TOKEN;
 }
 
 const opacParams = {
@@ -309,11 +320,14 @@ export const options = {
   },
 };
 
-export function setup() {
+export async function setup() {
+  RESOLVED_TOKEN = await resolveToken();
+  if (RESOLVED_TOKEN) opacHeaders[EXTERNAL_SERVICE_HEADER] = RESOLVED_TOKEN;
   console.log(`========================================`);
   console.log(`KOHA OPAC BENCHMARK TEST`);
   console.log(`========================================`);
   console.log(`OPAC_URL: ${OPAC_URL}`);
+  console.log(`${EXTERNAL_SERVICE_HEADER}: ${RESOLVED_TOKEN ? `set (${EXTERNAL_SERVICE_TOKEN ? "from env" : "from Grafana Cloud secret"})` : "not sent"}`);
   if (OPAC_HOST_HEADER) {
     console.log(`OPAC_HOST_HEADER: ${OPAC_HOST_HEADER}`);
   }
@@ -346,6 +360,7 @@ export function setup() {
   } else {
     console.log(`OPAC connectivity OK`);
   }
+  return { token: RESOLVED_TOKEN };
 }
 
 export function teardown() {
@@ -354,7 +369,13 @@ export function teardown() {
   console.log(`========================================`);
 }
 
-export default function () {
+export default function (data) {
+  // Per-VU: adopt the token setup resolved ( env or secret ) so the ingress
+  // header goes out on this VU's requests
+  if (data && data.token && RESOLVED_TOKEN !== data.token) {
+    RESOLVED_TOKEN = data.token;
+    opacHeaders[EXTERNAL_SERVICE_HEADER] = RESOLVED_TOKEN;
+  }
   const currentVUs = exec.instance.vusActive;
   if (currentVUs > __peakVUs) {
     __peakVUs = currentVUs;
