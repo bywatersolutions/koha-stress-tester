@@ -46,7 +46,11 @@ const OPAC_HOST_HEADER = __ENV.OPAC_HOST_HEADER || "";
 const [STAFF_PROTOCOL, STAFF_HOST] = STAFF_URL.split("://");
 const STAFF_BASE_URL = `${STAFF_PROTOCOL}://${STAFF_HOST}`;
 const STAFF_USER = __ENV.STAFF_USER || "koha";
-const STAFF_PASS = __ENV.STAFF_PASS || "koha";
+// Password from the STAFF_PASS env var, or the Grafana Cloud secret named
+// STAFF_PASS_SECRET on cloud runs ( write-only, redacted ). RESOLVED_PASS is
+// filled in setup() and threaded through data to the VU scenarios.
+const STAFF_PASS_ENV = __ENV.STAFF_PASS || "";
+const STAFF_PASS_SECRET = __ENV.STAFF_PASS_SECRET || "staff-pass";
 const API = `${STAFF_PROTOCOL}://${STAFF_HOST}/api/v1`;
 const CGI = `${STAFF_BASE_URL}/cgi-bin/koha`;
 
@@ -76,6 +80,12 @@ async function resolveToken() {
   if (EXTERNAL_SERVICE_TOKEN) return EXTERNAL_SERVICE_TOKEN;
   try { return await secrets.get(EXTERNAL_SERVICE_TOKEN_SECRET); }
   catch (e) { return ""; }
+}
+let RESOLVED_PASS = STAFF_PASS_ENV;
+async function resolvePass() {
+  if (STAFF_PASS_ENV) return STAFF_PASS_ENV;
+  try { return await secrets.get(STAFF_PASS_SECRET); }
+  catch (e) { return "koha"; }
 }
 
 const CLOUD_TEST_NAME = __ENV.CLOUD_TEST_NAME || "koha-steady-state";
@@ -194,13 +204,13 @@ function pageParams(contentType) {
 }
 function staffApiParams() {
   const h = baseHeaders("application/json");
-  h["Authorization"] = `Basic ${b64encode(`${STAFF_USER}:${STAFF_PASS}`)}`;
+  h["Authorization"] = `Basic ${b64encode(`${STAFF_USER}:${RESOLVED_PASS}`)}`;
   if (STAFF_HOST_HEADER) h["Host"] = STAFF_HOST_HEADER;
   return { headers: h, tags: { scenario: "staff" } };
 }
 function patronApiParams() {
   const h = baseHeaders("application/json");
-  h["Authorization"] = `Basic ${b64encode(`${STAFF_USER}:${STAFF_PASS}`)}`;
+  h["Authorization"] = `Basic ${b64encode(`${STAFF_USER}:${RESOLVED_PASS}`)}`;
   if (STAFF_HOST_HEADER) h["Host"] = STAFF_HOST_HEADER;
   return { headers: h, tags: { scenario: "patron" } };
 }
@@ -223,10 +233,12 @@ function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 // ------------------------------------------------------------
 export async function setup() {
   RESOLVED_TOKEN = await resolveToken();
+  RESOLVED_PASS = await resolvePass();
   console.log("========================================");
   console.log("KOHA STEADY-STATE COMBINED TEST");
   console.log("========================================");
   console.log(`STAFF_URL: ${STAFF_URL}`);
+  console.log(`STAFF_PASS: ${STAFF_PASS_ENV ? "from env" : RESOLVED_PASS === "koha" ? "default (koha)" : `from Grafana Cloud secret '${STAFF_PASS_SECRET}'`}`);
   console.log(`PATRON_MODE: ${PATRON_MODE}${PATRON_MODE === "opac" ? ` (OPAC_URL ${OPAC_URL})` : " (Aspen REST API emulation)"}`);
   console.log(`staff:  ${staffRate} txn/hour (pool ${staffPool} workstations, each logs in once)`);
   console.log(`patron: ${patronRate} sessions/hour (pool ${patronPool})`);
@@ -269,7 +281,7 @@ export async function setup() {
   if (items.length < 5) throw new Error(`Need >=5 available items, found ${items.length}`);
 
   console.log(`Pools: ${patrons.length} patrons, ${items.length} items, ${biblioIds.size} biblios; staff branch ${staffBranch}`);
-  return { staffBranch, patrons, items, biblioIds: Array.from(biblioIds).slice(0, 40), token: RESOLVED_TOKEN };
+  return { staffBranch, patrons, items, biblioIds: Array.from(biblioIds).slice(0, 40), token: RESOLVED_TOKEN, pass: RESOLVED_PASS };
 }
 
 // ------------------------------------------------------------
@@ -289,7 +301,7 @@ function ensureStaffLogin(pp) {
   if (!csrf) return false;
   const login = http.post(`${CGI}/mainpage.pl`, {
     csrf_token: csrf, login_op: "cud-login", koha_login_context: "intranet",
-    login_userid: STAFF_USER, login_password: STAFF_PASS, branch: "",
+    login_userid: STAFF_USER, login_password: RESOLVED_PASS, branch: "",
   }, pageParams("application/x-www-form-urlencoded"));
   staffLoggedIn = login.status === 200 && login.body.includes("loggedinusername");
   return staffLoggedIn;
@@ -297,6 +309,7 @@ function ensureStaffLogin(pp) {
 
 export function staffTransaction(data) {
   RESOLVED_TOKEN = data.token; // per-VU: adopt the token setup resolved
+  RESOLVED_PASS = data.pass;
   const started = Date.now();
   let ok = true;
   const pp = pageParams();
@@ -376,6 +389,7 @@ function staffAction(action, data, pp) {
 // ------------------------------------------------------------
 export function patronSession(data) {
   RESOLVED_TOKEN = data.token; // per-VU: adopt the token setup resolved
+  RESOLVED_PASS = data.pass;
   const started = Date.now();
   let ok = true;
   try {
@@ -439,6 +453,7 @@ function opacBrowse() {
 // ------------------------------------------------------------
 export function teardown(data) {
   RESOLVED_TOKEN = data.token;
+  RESOLVED_PASS = data.pass;
   const params = staffApiParams();
   const stillOut = (item) => {
     const res = http.get(`${API}/checkouts?q=${jsonQ({ item_id: item.id })}`, params);
@@ -453,7 +468,7 @@ export function teardown(data) {
     const csrf = csrfFrom(form.body);
     http.post(`${CGI}/mainpage.pl`, {
       csrf_token: csrf, login_op: "cud-login", koha_login_context: "intranet",
-      login_userid: STAFF_USER, login_password: STAFF_PASS, branch: "",
+      login_userid: STAFF_USER, login_password: RESOLVED_PASS, branch: "",
     }, pageParams("application/x-www-form-urlencoded"));
     let returned = 0;
     for (const item of lingering) {
