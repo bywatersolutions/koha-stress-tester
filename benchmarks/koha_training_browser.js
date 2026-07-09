@@ -47,8 +47,9 @@ import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 //  ▶ HOW TO RUN: clone this test ( Save as… ), set the values marked
 //    "<<< SET" below ( search the script for "<<< SET" ), then click Run.
 //    Needs a superlibrarian login on the target ( RESTBasicAuth enabled ).
-//    This is a browser test - it runs real Chromium, so keep LIBRARIANS
-//    modest and mind the browser-VU cost.
+//    This is a browser test - it runs real Chromium. LIBRARIANS is the class
+//    size; it runs a BROWSER_RATIO fraction of that as real browsers ( the
+//    HTTP test koha_training_protocol.js carries the full-class load ).
 // ══════════════════════════════════════════════════════════════════════
 const STAFF_URL = __ENV.STAFF_URL || "http://kohadev-intra.localhost"; // <<< SET: staff interface URL of the server to test
 const STAFF_HOST_HEADER = __ENV.STAFF_HOST_HEADER || "";
@@ -70,7 +71,19 @@ const STAFF_PASS_SECRET = __ENV.STAFF_PASS_SECRET || "staff-pass";
 // trainees stagger their logins to avoid hammering the server, so the
 // class trickles in over LOGIN_JITTER_S and the first exercise tick only
 // starts after that window closes.
-const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75; // <<< SET: how many attendees ( concurrent Chromium browsers )
+const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75; // <<< SET: class size ( number of attendees )
+// Running LIBRARIANS *real* browsers is expensive ( browser VUs bill 10x and
+// Grafana caps them at 100 per test ), and past a handful the extra browsers
+// only add server load the cheaper HTTP test ( koha_training_protocol.js )
+// already covers. So this runs a BROWSER_RATIO fraction of the class as an
+// experience sample. Set BROWSER_VUS to force an exact browser count ( it wins
+// over the ratio ). The result is always clamped to the 100 browser-VU cap.
+const BROWSER_RATIO = parseFloat(__ENV.BROWSER_RATIO) || 0.33; // <<< SET: fraction of the class run as real browsers
+const BROWSER_VU_HARD_CAP = 100;
+const BROWSER_VUS = Math.min(
+  BROWSER_VU_HARD_CAP,
+  Math.max(1, parseInt(__ENV.BROWSER_VUS) || Math.ceil(LIBRARIANS * BROWSER_RATIO)),
+);
 const STEP_INTERVAL_S = parseInt(__ENV.STEP_INTERVAL_S) || 90;
 const STEP_JITTER_S = parseFloat(__ENV.STEP_JITTER_S) || 5;
 const TYPING_JITTER_S = parseFloat(__ENV.TYPING_JITTER_S) || 15;
@@ -192,7 +205,7 @@ export const options = {
   scenarios: {
     training: {
       executor: "per-vu-iterations",
-      vus: LIBRARIANS,
+      vus: BROWSER_VUS,
       iterations: 1,
       // The whole session plus generous room for browser startup and stragglers
       maxDuration: `${STARTUP_GRACE_S + LOGIN_JITTER_S + STEPS.length * STEP_INTERVAL_S + 300}s`,
@@ -299,10 +312,15 @@ export async function setup() {
   if (STAFF_HOST_HEADER) {
     console.log(`STAFF_HOST_HEADER: ${STAFF_HOST_HEADER}`);
   }
-  console.log(`LIBRARIANS: ${LIBRARIANS}`);
+  console.log(`LIBRARIANS: ${LIBRARIANS} (class size)`);
+  console.log(
+    `Browser VUs: ${BROWSER_VUS}` +
+      (__ENV.BROWSER_VUS ? " (BROWSER_VUS override)" : ` (${BROWSER_RATIO} of the class)`) +
+      (BROWSER_VUS === BROWSER_VU_HARD_CAP ? ` [capped at ${BROWSER_VU_HARD_CAP}]` : ""),
+  );
   console.log(`STEP_INTERVAL_S: ${STEP_INTERVAL_S} (jitter ${STEP_JITTER_S}s, typing jitter ${TYPING_JITTER_S}s, login window ${LOGIN_JITTER_S}s, startup grace ${STARTUP_GRACE_S}s)`);
   console.log(`Curriculum: ${STEPS.join(" -> ")}`);
-  console.log(`Logins: ${TRAINING_USER_PREFIX ? `${TRAINING_USER_PREFIX}1..${TRAINING_USER_PREFIX}${LIBRARIANS}` : `shared (${STAFF_USER})`}`);
+  console.log(`Logins: ${TRAINING_USER_PREFIX ? `${TRAINING_USER_PREFIX}1..${TRAINING_USER_PREFIX}${BROWSER_VUS}` : `shared (${STAFF_USER})`}`);
   const token = await externalServiceToken();
   console.log(`${EXTERNAL_SERVICE_HEADER}: ${token ? `set (${EXTERNAL_SERVICE_TOKEN ? "from env" : "from Grafana Cloud secret"})` : "not sent"}`);
   await staffPassword();
@@ -332,9 +350,9 @@ export async function setup() {
     return res.status !== 200 || res.json().length > 0;
   };
 
-  // One patron and one item per attendee, plus a spare pair for the
+  // One patron and one item per browser VU, plus a spare pair for the
   // hold-target fallback below
-  const wanted = LIBRARIANS + 1;
+  const wanted = BROWSER_VUS + 1;
 
   const patronFilter = {};
   if (PATRON_CATEGORY_ID) {
@@ -375,7 +393,7 @@ export async function setup() {
   if (items.length < wanted) {
     throw new Error(`Need ${wanted} available existing items but only found ${items.length}; adjust LIBRARY_ID or check the catalog`);
   }
-  console.log(`Selected ${LIBRARIANS} existing patrons and ${LIBRARIANS} available items (plus a spare pair)`);
+  console.log(`Selected ${BROWSER_VUS} existing patrons and ${BROWSER_VUS} available items (plus a spare pair)`);
 
   // The shared hold target: a bib whose copies are ALL checked out is
   // holdable under any on-shelf-holds policy. Use the configured one, find
@@ -794,6 +812,7 @@ export function handleSummary(data) {
       staffUrl: STAFF_URL,
       staffHostHeader: STAFF_HOST_HEADER || "(not set)",
       librarians: LIBRARIANS,
+      browserVus: BROWSER_VUS,
       stepIntervalS: STEP_INTERVAL_S,
       stepJitterS: STEP_JITTER_S,
       typingJitterS: TYPING_JITTER_S,
