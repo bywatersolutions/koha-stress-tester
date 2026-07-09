@@ -559,7 +559,11 @@ export default async function (data) {
 
   try {
     const loggedIn = await runStep("login", page, async () => {
-      await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/mainpage.pl`, { waitUntil: "networkidle" });
+      // domcontentloaded, not networkidle: from Grafana's cloud instances a
+      // single slow asset on the staff mainpage can leave networkidle waiting
+      // forever, hanging the VU. The login form is in the initial HTML and the
+      // locators below auto-wait, so we don't need every asset settled.
+      await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/mainpage.pl`, { waitUntil: "domcontentloaded" });
 
       const localLoginBtn = page.locator("#locallogin_button");
       if ((await localLoginBtn.count()) > 0) {
