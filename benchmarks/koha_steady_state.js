@@ -37,30 +37,30 @@ import secrets from "k6/secrets";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 
 // ══════════════════════════════════════════════════════════════════════
-//  ▶ HOW TO RUN: clone this test ( Save as… ), set the values marked
-//    "<<< SET" below ( search the script for "<<< SET" ), then click Run.
+//  ▶ HOW TO RUN: clone this test ( Save as… ), set the values in the
+//    RUN CONFIG block below, then click Run.
 //    Needs a superlibrarian login on the target ( RESTBasicAuth enabled ).
 // ══════════════════════════════════════════════════════════════════════
+// ─── RUN CONFIG ( edit these ) ────────────────────────────────────────
 const STAFF_URL = __ENV.STAFF_URL || "http://kohadev-intra.localhost"; // <<< SET: staff interface URL of the server to test
 const OPAC_URL = __ENV.OPAC_URL || "http://kohadev.localhost"; // <<< SET: public catalog URL ( used when PATRON_MODE=opac )
+const STAFF_USER = __ENV.STAFF_USER || "koha"; // <<< SET: superlibrarian username
+const STAFF_PASS_ENV = __ENV.STAFF_PASS || ""; // <<< SET: superlibrarian password ( or leave "" to use the org 'staff-pass' secret )
+const STAFF_TRANSACTIONS_PER_HOUR = parseFloat(__ENV.STAFF_TRANSACTIONS_PER_HOUR) || 1000; // <<< SET: staff transactions/hour
+const PATRON_MODE = (__ENV.PATRON_MODE || "aspen").toLowerCase(); // <<< SET: 'aspen' ( emulate Aspen API load ) or 'opac' ( direct OPAC )
+const PATRON_SESSIONS_PER_HOUR = parseFloat(__ENV.PATRON_SESSIONS_PER_HOUR) || 2000; // <<< SET: patron sessions/hour when PATRON_MODE=aspen
+const OPAC_SEARCHES_PER_HOUR = parseFloat(__ENV.OPAC_SEARCHES_PER_HOUR) || 0; // <<< SET: patron searches/hour when PATRON_MODE=opac ( a session = 2 searches )
+// ──────────────────────────────────────────────────────────────────────
+// Derived / internal
 const STAFF_HOST_HEADER = __ENV.STAFF_HOST_HEADER || "";
 const OPAC_HOST_HEADER = __ENV.OPAC_HOST_HEADER || "";
 const [STAFF_PROTOCOL, STAFF_HOST] = STAFF_URL.split("://");
 const STAFF_BASE_URL = `${STAFF_PROTOCOL}://${STAFF_HOST}`;
-const STAFF_USER = __ENV.STAFF_USER || "koha"; // <<< SET: superlibrarian username
-// Password from the STAFF_PASS env var, or the Grafana Cloud secret named
-// STAFF_PASS_SECRET on cloud runs ( write-only, redacted ). RESOLVED_PASS is
-// filled in setup() and threaded through data to the VU scenarios.
-const STAFF_PASS_ENV = __ENV.STAFF_PASS || ""; // <<< SET: superlibrarian password ( or leave "" to use the org 'staff-pass' secret )
+// STAFF_PASS_ENV ( above ) wins; else the password is read in setup() from the
+// Grafana Cloud secret named STAFF_PASS_SECRET ( write-only, redacted ).
 const STAFF_PASS_SECRET = __ENV.STAFF_PASS_SECRET || "staff-pass";
 const API = `${STAFF_PROTOCOL}://${STAFF_HOST}/api/v1`;
 const CGI = `${STAFF_BASE_URL}/cgi-bin/koha`;
-
-const STAFF_TRANSACTIONS_PER_HOUR = parseFloat(__ENV.STAFF_TRANSACTIONS_PER_HOUR) || 1000; // <<< SET: staff transactions/hour
-const PATRON_MODE = (__ENV.PATRON_MODE || "aspen").toLowerCase(); // <<< SET: 'aspen' ( emulate Aspen API load ) or 'opac' ( direct OPAC )
-const PATRON_SESSIONS_PER_HOUR = parseFloat(__ENV.PATRON_SESSIONS_PER_HOUR) || 2000; // <<< SET: patron sessions/hour when PATRON_MODE=aspen
-// opac mode: a session issues 2 searches, so its session rate = searches/2
-const OPAC_SEARCHES_PER_HOUR = parseFloat(__ENV.OPAC_SEARCHES_PER_HOUR) || 0; // <<< SET: patron searches/hour when PATRON_MODE=opac
 
 const DURATION = __ENV.DURATION || "5m";
 const RAMP_TIME = __ENV.RAMP_TIME || "30s";

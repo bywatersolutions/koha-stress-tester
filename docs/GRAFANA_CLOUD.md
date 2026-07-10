@@ -19,11 +19,11 @@ CLI. The project is
 1. Open the [project](https://bws.grafana.net/a/k6-app/projects/8020159) and click the test you want.
 2. **Clone it** so you don't disturb the template or someone else's run: open the
    script editor and choose **Save as…** (give it a name like `OPAC — PWPL`).
-3. In your copy's script, edit the values marked **`<<< SET`** near the top —
-   search the script for `<<< SET` to find them all. At minimum that's the
-   **target URL**; tests that log in also want the **superlibrarian username and
-   password**, and each test has a **load knob** (searches/hour, transactions/
-   hour, or number of attendees).
+3. In your copy's script, edit the values in the **`RUN CONFIG` block** at the
+   top (every editable line is there, each marked `<<< SET`). At minimum that's
+   the **target URL**; tests that log in also want the **superlibrarian username
+   and password**, and each test has a **load knob** (searches/hour,
+   transactions/hour, or number of attendees).
 4. Click **Run**.
 
 That's it. Your clone keeps its own target and credentials, so several people
