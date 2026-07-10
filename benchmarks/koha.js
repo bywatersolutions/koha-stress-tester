@@ -212,7 +212,7 @@ async function login(username, password, page) {
 }
 
 async function logout(page) {
-  await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/staff/logout.pl`);
+  await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/mainpage.pl?logout.x=1`);
   await page.waitForSelector("body");
 }
 

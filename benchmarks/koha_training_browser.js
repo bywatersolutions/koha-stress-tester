@@ -44,46 +44,42 @@ import secrets from "k6/secrets";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 
 // ══════════════════════════════════════════════════════════════════════
-//  ▶ HOW TO RUN: clone this test ( Save as… ), set the values marked
-//    "<<< SET" below ( search the script for "<<< SET" ), then click Run.
+//  ▶ HOW TO RUN: clone this test ( Save as… ), set the values in the
+//    RUN CONFIG block below, then click Run.
 //    Needs a superlibrarian login on the target ( RESTBasicAuth enabled ).
 //    This is a browser test - it runs real Chromium. LIBRARIANS is the class
 //    size; it runs a BROWSER_RATIO fraction of that as real browsers ( the
 //    HTTP test koha_training_protocol.js carries the full-class load ).
 // ══════════════════════════════════════════════════════════════════════
+// ─── RUN CONFIG ( edit these ) ────────────────────────────────────────
 const STAFF_URL = __ENV.STAFF_URL || "http://kohadev-intra.localhost"; // <<< SET: staff interface URL of the server to test
+const STAFF_USER = __ENV.STAFF_USER || "koha"; // <<< SET: superlibrarian username
+const STAFF_PASS_ENV = __ENV.STAFF_PASS || ""; // <<< SET: superlibrarian password ( or leave "" to use the org 'staff-pass' secret )
+const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75; // <<< SET: class size ( number of attendees )
+const BROWSER_RATIO = parseFloat(__ENV.BROWSER_RATIO) || 0.33; // <<< SET: fraction of the class run as real browsers
+const CATALOG_SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter"; // <<< SET: a term with hits in the target catalog
+// ──────────────────────────────────────────────────────────────────────
+// Derived / internal
 const STAFF_HOST_HEADER = __ENV.STAFF_HOST_HEADER || "";
 const [STAFF_PROTOCOL, STAFF_HOST] = STAFF_URL.split("://");
 const STAFF_BASE_URL = `${STAFF_PROTOCOL}://${STAFF_HOST}`;
-const STAFF_USER = __ENV.STAFF_USER || "koha"; // <<< SET: superlibrarian username
-// The staff password comes from the STAFF_PASS env var locally, or from the
-// Grafana Cloud secret named STAFF_PASS_SECRET on cloud runs (write-only,
-// redacted in logs), falling back to the KTD default
-const STAFF_PASS_ENV = __ENV.STAFF_PASS || ""; // <<< SET: superlibrarian password ( or leave "" to use the org 'staff-pass' secret )
+// STAFF_PASS_ENV ( above ) wins; else the password is read on cloud runs from
+// the Grafana Cloud secret named STAFF_PASS_SECRET ( write-only, redacted ).
 const STAFF_PASS_SECRET = __ENV.STAFF_PASS_SECRET || "staff-pass";
 
-// How many attendees are in the class, and the trainer's pacing.
-// Scan-and-click steps use STEP_JITTER_S; steps where attendees type
-// (a cardnumber, a search query) spread out over TYPING_JITTER_S because
-// thirty humans don't finish typing together. place_hold keeps the tight
-// jitter on purpose - that collision is the point of the exercise.
-// Login gets its own, much wider window: trainers deliberately have
-// trainees stagger their logins to avoid hammering the server, so the
-// class trickles in over LOGIN_JITTER_S and the first exercise tick only
-// starts after that window closes.
-const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75; // <<< SET: class size ( number of attendees )
-// Running LIBRARIANS *real* browsers is expensive ( browser VUs bill 10x and
-// Grafana caps them at 100 per test ), and past a handful the extra browsers
-// only add server load the cheaper HTTP test ( koha_training_protocol.js )
-// already covers. So this runs a BROWSER_RATIO fraction of the class as an
-// experience sample. Set BROWSER_VUS to force an exact browser count ( it wins
-// over the ratio ). The result is always clamped to the 100 browser-VU cap.
-const BROWSER_RATIO = parseFloat(__ENV.BROWSER_RATIO) || 0.33; // <<< SET: fraction of the class run as real browsers
+// Real browsers are expensive ( browser VUs bill 10x, capped at 100/test ) and
+// past a handful only add server load the HTTP test already covers - so run
+// BROWSER_RATIO of the class as an experience sample. BROWSER_VUS forces an
+// exact count ( wins over the ratio ). Always <= 100.
 const BROWSER_VU_HARD_CAP = 100;
 const BROWSER_VUS = Math.min(
   BROWSER_VU_HARD_CAP,
   Math.max(1, parseInt(__ENV.BROWSER_VUS) || Math.ceil(LIBRARIANS * BROWSER_RATIO)),
 );
+
+// Trainer pacing. Scan-and-click steps use STEP_JITTER_S; typing steps spread
+// over TYPING_JITTER_S; login gets a much wider LOGIN_JITTER_S window because
+// trainees stagger their logins, and the first tick waits for it to close.
 const STEP_INTERVAL_S = parseInt(__ENV.STEP_INTERVAL_S) || 90;
 const STEP_JITTER_S = parseFloat(__ENV.STEP_JITTER_S) || 5;
 const TYPING_JITTER_S = parseFloat(__ENV.TYPING_JITTER_S) || 15;
@@ -100,9 +96,6 @@ const STARTUP_GRACE_S = parseInt(__ENV.STARTUP_GRACE_S) || 15;
 // works out of the box but exercises one account instead of N.
 const TRAINING_USER_PREFIX = __ENV.TRAINING_USER_PREFIX || "";
 const TRAINING_USER_PASS = __ENV.TRAINING_USER_PASS || "";
-
-// The shared catalog exercise ("everyone search for ...")
-const CATALOG_SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter"; // <<< SET: a term with hits in the target catalog
 
 // Optional filters for selecting the existing patrons and items the class
 // uses; leave blank to pick from the whole catalog
@@ -369,11 +362,27 @@ export async function setup() {
     throw new Error(`Need ${wanted} usable existing patrons (active, unrestricted, with a cardnumber) but only found ${patrons.length}; adjust PATRON_CATEGORY_ID/LIBRARY_ID`);
   }
 
+  // Item types that can't be circulated ( notforloan at the type level ). The
+  // item-level not_for_loan_status filter below doesn't catch these, so a
+  // checkout of such an item silently fails - which is what breaks the class.
+  const notForLoanTypes = new Set();
+  const typesRes = http.get(`${API}/item_types?_per_page=500`, params);
+  if (typesRes.status === 200) {
+    for (const t of typesRes.json()) {
+      if (t.not_for_loan_status) notForLoanTypes.add(t.item_type_id);
+    }
+  }
+
   const itemFilter = { lost_status: 0, not_for_loan_status: 0, withdrawn: 0, damaged_status: 0 };
   if (LIBRARY_ID) {
     itemFilter.home_library_id = LIBRARY_ID;
   }
-  const itemsRes = http.get(`${API}/items?q=${jsonQ(itemFilter)}&_per_page=${wanted * 3 + 20}`, params);
+  // Exclude not-for-loan item types in the query, so the page isn't filled with
+  // items that can't be checked out ( which would starve the loanable pool )
+  if (notForLoanTypes.size) {
+    itemFilter.item_type_id = { "-not_in": [...notForLoanTypes] };
+  }
+  const itemsRes = http.get(`${API}/items?q=${jsonQ(itemFilter)}&_per_page=${wanted * 5 + 50}`, params);
   check(itemsRes, { "Loaded items": (r) => r.status === 200 });
   const items = [];
   for (const candidate of mustJson(itemsRes, "Loading items")) {
@@ -386,6 +395,10 @@ export async function setup() {
       continue;
     }
     if (biblioHasHolds(candidate.biblio_id) || isCheckedOut(candidate.item_id)) {
+      continue;
+    }
+    // Item's effective type must be loanable, or the checkout step fails
+    if (notForLoanTypes.has(candidate.effective_item_type_id)) {
       continue;
     }
     items.push(candidate);
@@ -574,6 +587,11 @@ export default async function (data) {
 
   const page = await browser.newPage();
   await pageExtraHeaders(page);
+  // Bound every operation so a mismatched selector fails in seconds instead of
+  // hanging for the default navigation timeout ( a wrong login selector was
+  // hanging the step ~4 minutes and wrecking p95 )
+  page.setDefaultTimeout(20000);
+  page.setDefaultNavigationTimeout(30000);
 
   try {
     const loggedIn = await runStep("login", page, async () => {
@@ -583,14 +601,21 @@ export default async function (data) {
       // locators below auto-wait, so we don't need every asset settled.
       await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/mainpage.pl`, { waitUntil: "domcontentloaded" });
 
-      const localLoginBtn = page.locator("#locallogin_button");
-      if ((await localLoginBtn.count()) > 0) {
-        await localLoginBtn.click();
+      // On SSO sites ( e.g. PWPL ) the local login form is in the DOM but HIDDEN
+      // behind a "Local Koha Login" toggle ( #locallogin_button ). If the
+      // username field isn't visible, click the toggle and wait for it to show.
+      const userField = page.locator('input[name="login_userid"]');
+      if (!(await userField.isVisible())) {
+        const toggle = page.locator("#locallogin_button");
+        if ((await toggle.count()) > 0) {
+          await toggle.click();
+        }
+        await userField.waitFor({ state: "visible" });
       }
-      await page.locator('input[name="login_userid"]').type(username);
+      await userField.type(username);
       await page.locator('input[name="login_password"]').type(password);
       await Promise.all([
-        page.waitForNavigation(),
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
         page.locator("#submit-button").click({ force: true }),
       ]);
 
@@ -624,14 +649,14 @@ export default async function (data) {
       );
       await page.locator('#circ_circulation_issue input[name="barcode"]').type(item.external_id);
       await Promise.all([
-        page.waitForNavigation(),
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
         page.locator('#circ_circulation_issue button[type="submit"]').click(),
       ]);
       // Real-world items can trigger a confirm dialog (rental charge, age
       // restriction, ...) - approve it like a trainee would
       const confirmBtn = page.locator("#circ_needsconfirmation button.approve");
       if ((await confirmBtn.count()) > 0) {
-        await Promise.all([page.waitForNavigation(), confirmBtn.first().click()]);
+        await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), confirmBtn.first().click()]);
       }
       // The 'Checked out: <title> (<barcode>). Due on <date>' confirmation
       const body = await page.locator("body").textContent();
@@ -644,7 +669,7 @@ export default async function (data) {
       await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/circ/returns.pl`, { waitUntil: "domcontentloaded" });
       await page.locator("#barcode").type(item.external_id);
       await Promise.all([
-        page.waitForNavigation(),
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
         page.locator('#circ_returns_checkin button[type="submit"]').click(),
       ]);
       const body = await page.locator("body").textContent();
@@ -682,7 +707,7 @@ export default async function (data) {
       if ((await placeHoldBtn.count()) === 0) {
         throw new Error("Place hold button not found (hold may be blocked by policy)");
       }
-      await Promise.all([page.waitForNavigation(), placeHoldBtn.first().click()]);
+      await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), placeHoldBtn.first().click()]);
       // The existing-holds list is an AJAX DataTable that fills on its own
       // schedule, so verify against the API instead of racing the render
       const holdsRes = http.get(
@@ -732,7 +757,7 @@ export default async function (data) {
           await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/circ/returns.pl`, { waitUntil: "domcontentloaded" });
           await page.locator("#barcode").type(barcode);
           await Promise.all([
-            page.waitForNavigation(),
+            page.waitForNavigation({ waitUntil: "domcontentloaded" }),
             page.locator('#circ_returns_checkin button[type="submit"]').click(),
           ]);
           // Dismiss a hold-found or transfer modal if one appears
@@ -752,7 +777,7 @@ export default async function (data) {
     }
 
     await runStep("logout", page, async () => {
-      await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/staff/logout.pl`, { waitUntil: "domcontentloaded" });
+      await page.goto(`${STAFF_BASE_URL}/cgi-bin/koha/mainpage.pl?logout.x=1`, { waitUntil: "domcontentloaded" });
     });
     console.log(`VU ${vuNumber} finished the training session`);
   } finally {

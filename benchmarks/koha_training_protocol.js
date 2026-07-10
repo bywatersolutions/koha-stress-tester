@@ -34,20 +34,22 @@ import secrets from "k6/secrets";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 
 // ══════════════════════════════════════════════════════════════════════
-//  ▶ HOW TO RUN: clone this test ( Save as… ), set the values marked
-//    "<<< SET" below ( search the script for "<<< SET" ), then click Run.
+//  ▶ HOW TO RUN: clone this test ( Save as… ), set the values in the
+//    RUN CONFIG block below, then click Run.
 //    Needs a superlibrarian login on the target ( RESTBasicAuth enabled ).
 // ══════════════════════════════════════════════════════════════════════
+// ─── RUN CONFIG ( edit these ) ────────────────────────────────────────
 const STAFF_URL = __ENV.STAFF_URL || "http://kohadev-intra.localhost"; // <<< SET: staff interface URL of the server to test
+const STAFF_USER = __ENV.STAFF_USER || "koha"; // <<< SET: superlibrarian username
+const STAFF_PASS_ENV = __ENV.STAFF_PASS || ""; // <<< SET: superlibrarian password ( or leave "" to use the org 'staff-pass' secret )
+const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75; // <<< SET: how many attendees ( concurrent logged-in staff )
+const CATALOG_SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter"; // <<< SET: a term with hits in the target catalog
+// ──────────────────────────────────────────────────────────────────────
+// Derived / internal
 const STAFF_HOST_HEADER = __ENV.STAFF_HOST_HEADER || "";
 const [STAFF_PROTOCOL, STAFF_HOST] = STAFF_URL.split("://");
 const STAFF_BASE_URL = `${STAFF_PROTOCOL}://${STAFF_HOST}`;
-const STAFF_USER = __ENV.STAFF_USER || "koha"; // <<< SET: superlibrarian username
-
-const STAFF_PASS_ENV = __ENV.STAFF_PASS || ""; // <<< SET: superlibrarian password ( or leave "" to use the org 'staff-pass' secret )
 const STAFF_PASS_SECRET = __ENV.STAFF_PASS_SECRET || "staff-pass";
-
-const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75; // <<< SET: how many attendees ( concurrent logged-in staff )
 const STEP_INTERVAL_S = parseInt(__ENV.STEP_INTERVAL_S) || 90;
 const STEP_JITTER_S = parseFloat(__ENV.STEP_JITTER_S) || 5;
 const TYPING_JITTER_S = parseFloat(__ENV.TYPING_JITTER_S) || 15;
@@ -57,8 +59,6 @@ const STARTUP_GRACE_S = parseInt(__ENV.STARTUP_GRACE_S) || 15;
 
 const TRAINING_USER_PREFIX = __ENV.TRAINING_USER_PREFIX || "";
 const TRAINING_USER_PASS = __ENV.TRAINING_USER_PASS || "";
-
-const CATALOG_SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter"; // <<< SET: a term with hits in the target catalog
 
 const LIBRARY_ID = __ENV.LIBRARY_ID || "";
 const PATRON_CATEGORY_ID = __ENV.PATRON_CATEGORY_ID || "";
@@ -283,14 +283,29 @@ export async function setup() {
     throw new Error(`Need ${wanted} usable existing patrons but found ${patrons.length}; adjust PATRON_CATEGORY_ID/LIBRARY_ID`);
   }
 
+  // Item types that can't be circulated ( notforloan at the type level ); the
+  // item-level not_for_loan_status filter below doesn't catch these, so a
+  // checkout of such an item silently fails - which breaks the checkout step.
+  const notForLoanTypes = new Set();
+  const typesRes = http.get(`${API}/item_types?_per_page=500`, params);
+  if (typesRes.status === 200) {
+    for (const t of typesRes.json()) {
+      if (t.not_for_loan_status) notForLoanTypes.add(t.item_type_id);
+    }
+  }
+
   const itemFilter = { lost_status: 0, not_for_loan_status: 0, withdrawn: 0, damaged_status: 0 };
   if (LIBRARY_ID) itemFilter.home_library_id = LIBRARY_ID;
-  const itemsRes = http.get(`${API}/items?q=${jsonQ(itemFilter)}&_per_page=${wanted * 3 + 20}`, params);
+  // Exclude not-for-loan item types in the query, so the page isn't filled with
+  // items that can't be checked out ( which would starve the loanable pool )
+  if (notForLoanTypes.size) itemFilter.item_type_id = { "-not_in": [...notForLoanTypes] };
+  const itemsRes = http.get(`${API}/items?q=${jsonQ(itemFilter)}&_per_page=${wanted * 5 + 50}`, params);
   const items = [];
   for (const candidate of mustJson(itemsRes, "Loading items")) {
     if (items.length >= wanted) break;
     if (!candidate.external_id) continue;
     if (biblioHasHolds(candidate.biblio_id) || isCheckedOut(candidate.item_id)) continue;
+    if (notForLoanTypes.has(candidate.effective_item_type_id)) continue;  // item type not loanable
     items.push(candidate);
   }
   if (items.length < wanted) {
@@ -554,7 +569,7 @@ export default function (data) {
   }
 
   runStep("logout", () => {
-    pget(`${CGI}/staff/logout.pl`);
+    pget(`${CGI}/mainpage.pl?logout.x=1`);
   });
   console.log(`VU ${vuNumber} finished the training session`);
 }
