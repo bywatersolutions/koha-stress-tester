@@ -46,6 +46,8 @@ my @SYNC_TESTS = (
     [ "koha_steady_state.js",      "Daily Operations" ],
     [ "koha_training_protocol.js", "Training Simulation - HTTP Only" ],
     [ "koha_training_browser.js",  "Training Simulation - End to End" ],
+    [ "aspen_http.js",             "Aspen Stress Test - HTTP Only" ],
+    [ "aspen_browser.js",          "Aspen Stress Test - Browser" ],
 );
 
 my $bench_dir = "$FindBin::Bin/../benchmarks";

@@ -1,233 +1,175 @@
 /**
  * aspen_browser.js - Aspen Discovery Browser Test
- * 
- * Requirements:
- * - k6 binary with browser support (not Docker)
- * - Chromium installed on your system
- * 
- * WARNING: Each VU spawns its own browser window. Running with VUS=10 will
- * open 10 browsers simultaneously. Keep VUS low, especially in visible mode.
- * 
- * For high-volume stress testing, use aspen_http.js instead (works in Docker).
+ *
+ * Real Chromium doing what a patron does at an Aspen Discovery front-end: open
+ * the homepage, run a keyword search, open a result's record page. It measures
+ * the actual rendered experience ( full page + assets + JS ), which the HTTP
+ * test ( aspen_http.js ) can't see - that one measures server response time,
+ * this one measures "did the page come up usably".
+ *
+ * Keep ASPEN_BROWSERS small: real browser VUs bill 10x and are capped at
+ * 100/test, and past a handful the extra ones just add server load the cheaper
+ * HTTP test already covers. This is an experience probe, not a load generator.
+ *
+ * Self-contained ( only remote imports ) so it pastes into the Grafana Cloud
+ * script editor.
  */
 import { browser } from "k6/browser";
-import { sleep, check } from "k6";
+import { check } from "k6";
+import { Trend, Rate } from "k6/metrics";
+import secrets from "k6/secrets";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
-import { randomElement } from "./lib/utils.js";
-import * as reporting from "./lib/reporting.js";
 
-// ------------------------------------------------------------
-// TEST CONFIG
-// ------------------------------------------------------------
-// Browser args for container/sandbox compatibility
-const browserArgs = [
-  "--no-sandbox",
-  "--disable-setuid-sandbox",
-  "--disable-gpu",
-  "--disable-dev-shm-usage",
-  "--disable-software-rasterizer",
-  "--single-process",
-  "--window-size=1920,1080",
-];
+// ══════════════════════════════════════════════════════════════════════
+//  ▶ HOW TO RUN: clone this test ( Save as… ), set the values in the
+//    RUN CONFIG block below, then click Run.
+// ══════════════════════════════════════════════════════════════════════
+// ─── RUN CONFIG ( edit these ) ────────────────────────────────────────
+const BASE_URL = __ENV.BASE_URL || "https://aspen.localhost"; // <<< SET: Aspen Discovery URL to test
+const HOST_HEADER = __ENV.HOST_HEADER || ""; // <<< SET: Host header if Aspen is behind a proxy ( blank if not )
+const ASPEN_BROWSERS = parseInt(__ENV.ASPEN_BROWSERS) || 5; // <<< SET: concurrent real browsers ( keep small )
+const SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter"; // <<< SET: a term with hits in the target catalog
+// ──────────────────────────────────────────────────────────────────────
+// Derived / internal
+const DURATION = __ENV.DURATION || "3m";
+// Per-step render ceiling for the pass/fail threshold ( "the page came up" )
+const STEP_P95_MS = parseInt(__ENV.STEP_P95_MS) || 12000;
+const CHECKS_RATE = parseFloat(__ENV.CHECKS_RATE) || 0.98;
 
-// Add Wayland args for visible mode on Hyprland/Sway/Wayland compositors
-// K6_BROWSER_HEADLESS env var controls headless mode (set to "false" for visible)
-if (__ENV.K6_BROWSER_HEADLESS === "false" || __ENV.HEADLESS === "false") {
-  browserArgs.push("--ozone-platform=wayland");
-  browserArgs.push("--enable-features=UseOzonePlatform");
-}
+// Ingress header ( Cloudflare bypass ), from the env var or the Grafana Cloud
+// secret named EXTERNAL_SERVICE_TOKEN_SECRET on cloud runs.
+const EXTERNAL_SERVICE_HEADER = __ENV.EXTERNAL_SERVICE_HEADER || "x-grafana-cloud-external-service";
+const EXTERNAL_SERVICE_TOKEN = __ENV.EXTERNAL_SERVICE_TOKEN || "";
+const EXTERNAL_SERVICE_TOKEN_SECRET = __ENV.EXTERNAL_SERVICE_TOKEN_SECRET || "x-grafana-cloud-external-service-token";
 
-export const options = {
-  scenarios: {
-    ui: {
-      executor: "shared-iterations",
-      vus: __ENV.VUS || 1,
-      iterations: __ENV.ITERATIONS || 1,
-      gracefulStop: "10s",  // Allow browser sessions to complete cleanly
-      options: {
-        browser: {
-          type: "chromium",
-          args: browserArgs,
-        },
-      },
-    },
-  },
-  thresholds: {
-    checks: ["rate==1.0"],
-  },
-};
-
-// ------------------------------------------------------------
-// ENVIRONMENT VARIABLES
-// ------------------------------------------------------------
-const BASE_URL = __ENV.BASE_URL || "https://localhost";
-const HOST_HEADER = __ENV.HOST_HEADER || "";
-const RESULTS_TO_CLICK = parseInt(__ENV.RESULTS_TO_CLICK) || 5;
-const VUS = parseInt(__ENV.VUS) || 1;
-const ITERATIONS = parseInt(__ENV.ITERATIONS) || 1;
+const CLOUD_TEST_NAME = __ENV.CLOUD_TEST_NAME || "aspen-browser";
+const CLOUD_PROJECT_ID = __ENV.CLOUD_PROJECT_ID || "";
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
 
-const words = open("./words_alpha.txt").split(/\r?\n/).filter(w => w.trim());
+const browserArgs = ["--no-sandbox", "--disable-dev-shm-usage"];
 
-export function setup() {
-  console.log("BASE_URL:", BASE_URL);
-  console.log("K6_BROWSER_HEADLESS:", __ENV.K6_BROWSER_HEADLESS || "true (default)");
-  if (HOST_HEADER) {
-    console.log("HOST_HEADER:", HOST_HEADER);
+const cloudConfig = { name: CLOUD_TEST_NAME };
+if (CLOUD_PROJECT_ID) cloudConfig.projectID = parseInt(CLOUD_PROJECT_ID);
+
+export const options = {
+  cloud: cloudConfig,
+  scenarios: {
+    aspen: {
+      executor: "constant-vus",
+      vus: Math.min(100, Math.max(1, ASPEN_BROWSERS)),
+      duration: DURATION,
+      gracefulStop: "15s",
+      options: { browser: { type: "chromium", args: browserArgs } },
+    },
+  },
+  thresholds: {
+    "aspen_step_duration{step:home}": [`p(95)<${STEP_P95_MS}`],
+    "aspen_step_duration{step:search}": [`p(95)<${STEP_P95_MS}`],
+    "aspen_step_duration{step:detail}": [`p(95)<${STEP_P95_MS}`],
+    checks: [`rate>=${CHECKS_RATE}`],
+  },
+};
+
+const stepDuration = new Trend("aspen_step_duration", true);
+const stepFailed = new Rate("aspen_step_failed");
+
+// Ingress token resolved once in setup(), threaded to VUs and set as an extra
+// header on every navigation.
+let RESOLVED_TOKEN = EXTERNAL_SERVICE_TOKEN;
+async function resolveToken() {
+  if (EXTERNAL_SERVICE_TOKEN) return EXTERNAL_SERVICE_TOKEN;
+  try {
+    return await secrets.get(EXTERNAL_SERVICE_TOKEN_SECRET);
+  } catch (e) {
+    return "";
   }
 }
 
-export function teardown() {}
+async function pageExtraHeaders(page) {
+  const h = {};
+  if (RESOLVED_TOKEN) h[EXTERNAL_SERVICE_HEADER] = RESOLVED_TOKEN;
+  if (HOST_HEADER) h["Host"] = HOST_HEADER;
+  if (Object.keys(h).length) await page.setExtraHTTPHeaders(h);
+}
 
-export default async function () {
-  const searchTerm = randomElement(words);
-  console.log("Search term:", searchTerm);
+export async function setup() {
+  RESOLVED_TOKEN = await resolveToken();
+  console.log("========================================");
+  console.log("ASPEN BROWSER TEST");
+  console.log("========================================");
+  console.log(`BASE_URL: ${BASE_URL}`);
+  if (HOST_HEADER) console.log(`HOST_HEADER: ${HOST_HEADER}`);
+  console.log(`ASPEN_BROWSERS: ${Math.min(100, Math.max(1, ASPEN_BROWSERS))} | duration ${DURATION}`);
+  console.log(`Search term: "${SEARCH_TERM}"`);
+  console.log(
+    `${EXTERNAL_SERVICE_HEADER}: ${RESOLVED_TOKEN ? `set (${EXTERNAL_SERVICE_TOKEN ? "from env" : "from Grafana Cloud secret"})` : "not sent"}`,
+  );
+  console.log("========================================");
+  return { token: RESOLVED_TOKEN };
+}
+
+// Time a step, record its duration + a pass/fail check, and never let a hang
+// run away ( bounded by the page's default timeout ).
+async function runStep(name, fn) {
+  const started = Date.now();
+  let ok = true;
+  try {
+    await fn();
+  } catch (error) {
+    ok = false;
+    console.error(`step '${name}' failed: ${error && error.message ? error.message : String(error)}`);
+  } finally {
+    stepDuration.add(Date.now() - started, { step: name });
+    stepFailed.add(!ok, { step: name });
+    check(ok, { [`step ${name} completed`]: (v) => v === true });
+  }
+  return ok;
+}
+
+export default async function (data) {
+  RESOLVED_TOKEN = data.token; // per-VU: adopt the token setup resolved
 
   const page = await browser.newPage();
-  
+  await pageExtraHeaders(page);
+  // Bound every operation so a mismatched selector or a slow asset fails in
+  // seconds instead of hanging for the default navigation timeout.
+  page.setDefaultTimeout(20000);
+  page.setDefaultNavigationTimeout(30000);
+
   try {
-    // Only set Host header if explicitly provided (for localhost testing)
-    if (HOST_HEADER) {
-      await page.setExtraHTTPHeaders({ Host: HOST_HEADER });
-    }
-    
-    const response = await page.goto(BASE_URL, { waitUntil: "networkidle" });
-    
-    // Check if page loaded successfully
-    if (response && response.status() >= 400) {
-      console.error(`Page returned status ${response.status()} - site may be blocking automated access`);
-      return;
-    }
-
-    // Wait for page to be interactive
-    await page.waitForSelector("body", { timeout: 10000 });
-    await sleep(1);
-
-    // Find search input - try multiple selectors
-    let lookforInput;
-    const inputSelectors = ["#lookfor", "input[name='lookfor']", ".searchInput", "#searchForm input[type='text']"];
-    
-    for (const selector of inputSelectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: 5000 });
-        lookforInput = page.locator(selector);
-        console.log(`Found search input with selector: ${selector}`);
-        break;
-      } catch {
-        // Try next selector
-      }
-    }
-
-    if (!lookforInput) {
-      console.error("Could not find search input element");
-      return;
-    }
-
-    await lookforInput.type(searchTerm);
-
-    // Find search button - try multiple selectors
-    let searchButton;
-    const buttonSelectors = ["#horizontal-search-button-container button", "button[type='submit']", ".searchButton", "#searchForm button"];
-    
-    for (const selector of buttonSelectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: 2000 });
-        searchButton = page.locator(selector);
-        console.log(`Found search button with selector: ${selector}`);
-        break;
-      } catch {
-        // Try next selector
-      }
-    }
-    
-    if (!searchButton) {
-      console.error("Could not find search button element");
-      return;
-    }
-
-    await Promise.all([
-      page.waitForNavigation(),
-      searchButton.click({ force: true }),
-    ]);
-
-    // Save the search results URL so we can return to it
-    const searchResultsUrl = page.url();
-    console.log("Search results URL:", searchResultsUrl);
-
-    await sleep(Math.random() * 3);
-
-    // Wait for results to load (some searches may have no results)
-    try {
-      await page.waitForSelector(".result-title", { timeout: 15000 });
-    } catch {
-      const noResults = await page.$(".noResults, .nohit, #noResults");
-      if (noResults) {
-        console.log(`No results for search term: "${searchTerm}"`);
-      } else {
-        console.log("Timeout waiting for results");
-      }
-      return;
-    }
-    
-    // Get initial result count
-    const results = await page.$$(".result-title");
-    const resultCount = results.length;
-    console.log("Results found:", resultCount);
-
-    check(resultCount, {
-      "Has search results": (c) => c > 0,
+    // 1) Aspen home
+    const home = await runStep("home", async () => {
+      await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+      await page.locator('#lookfor, input[name="lookfor"]').first().waitFor({ state: "visible" });
     });
+    if (!home) return;
 
-    if (resultCount > 0) {
-      const clickCount = Math.min(RESULTS_TO_CLICK, resultCount);
-      for (let i = 0; i < clickCount; i++) {
-        try {
-          // Get fresh results from current page
-          const currentResults = await page.$$(".result-title");
-          if (currentResults.length === 0) {
-            console.log("No results on page, returning to search");
-            await page.goto(searchResultsUrl, { waitUntil: "networkidle" });
-            await page.waitForSelector(".result-title", { timeout: 10000 });
-            continue;
-          }
-          
-          const idx = Math.floor(Math.random() * currentResults.length);
-          const link = currentResults[idx];
+    // 2) Keyword search
+    const searched = await runStep("search", async () => {
+      const box = page.locator('#lookfor, input[name="lookfor"]').first();
+      await box.type(SEARCH_TERM);
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        box.press("Enter"),
+      ]);
+      // Results list ( or a "no results" page ) - either is a rendered response
+      await page.locator(".result-title, .noResults, .nohit, #noResults").first().waitFor();
+    });
+    if (!searched) return;
 
-          const linkText = await link.textContent();
-          console.log(`Clicking result ${i + 1}/${clickCount}: ${linkText}`);
-
-          await Promise.all([
-            page.waitForNavigation({ timeout: 15000 }),
-            link.click({ force: true }),
-          ]);
-
-          await page.waitForSelector("body", { timeout: 10000 });
-          await sleep(Math.random() * 3);
-
-          // Navigate back to search results using saved URL
-          await page.goto(searchResultsUrl, { waitUntil: "networkidle" });
-          await page.waitForSelector(".result-title", { timeout: 10000 });
-          await sleep(1);
-          
-        } catch (clickError) {
-          console.log("Click error, returning to search:", clickError?.message || "unknown");
-          // Try to recover by going back to search results
-          try {
-            await page.goto(searchResultsUrl, { waitUntil: "networkidle" });
-            await page.waitForSelector(".result-title", { timeout: 10000 });
-          } catch {
-            console.log("Could not recover, ending click loop");
-            break;
-          }
-        }
+    // 3) Open the first result's record page ( if there are results )
+    await runStep("detail", async () => {
+      const firstResult = page.locator(".result-title a").first();
+      if ((await firstResult.count()) === 0) {
+        return; // no results for this term - nothing to open, still a valid render
       }
-    } else {
-      console.log("No search results found.");
-    }
-  } catch (error) {
-    console.error("Test error:", error?.message || error || "Unknown error");
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        firstResult.click(),
+      ]);
+      await page.locator("#main-content, h1").first().waitFor();
+    });
   } finally {
     await page.close();
   }
@@ -235,48 +177,20 @@ export default async function () {
 
 export function handleSummary(data) {
   const m = data.metrics;
-
+  const p = (name) => {
+    const v = m[name] && m[name].values;
+    return v ? { med_ms: v.med?.toFixed(0), p95_ms: v["p(95)"]?.toFixed(0), max_ms: v.max?.toFixed(0) } : null;
+  };
   const summary = {
-    metadata: {
-      testScript: "aspen_browser.js",
-      testNumber: TEST_NUMBER,
-      timestamp: new Date().toISOString(),
-    },
-    config: {
-      baseUrl: BASE_URL,
-      hostHeader: HOST_HEADER || "(not set)",
-      resultsToClick: RESULTS_TO_CLICK,
-      vus: VUS,
-      iterations: ITERATIONS,
-      headless: __ENV.K6_BROWSER_HEADLESS !== "false",
-    },
+    metadata: { testScript: "aspen_browser.js", testNumber: TEST_NUMBER },
+    config: { baseUrl: BASE_URL, browsers: Math.min(100, Math.max(1, ASPEN_BROWSERS)), searchTerm: SEARCH_TERM, stepP95Ms: STEP_P95_MS },
     result: {
-      totalIterations: m.iterations?.values?.count || 0,
-      iterationDuration_avg_ms: m.iteration_duration?.values?.avg?.toFixed(2) || null,
-      iterationDuration_p95_ms: m.iteration_duration?.values?.["p(95)"]?.toFixed(2) || null,
+      checksRate: m.checks ? (m.checks.values.rate * 100).toFixed(1) + "%" : null,
+      iterations: m.iterations?.values?.count,
+      stepDuration: p("aspen_step_duration"),
     },
-    browserMetrics: {
-      dataReceived_mb: ((m.browser_data_received?.values?.count || 0) / 1024 / 1024).toFixed(2),
-      dataSent_mb: ((m.browser_data_sent?.values?.count || 0) / 1024 / 1024).toFixed(2),
-      httpReqDuration_avg_ms: m.browser_http_req_duration?.values?.avg?.toFixed(2) || null,
-      httpReqDuration_p95_ms: m.browser_http_req_duration?.values?.["p(95)"]?.toFixed(2) || null,
-      httpReqFailed_rate: m.browser_http_req_failed?.values?.rate?.toFixed(4) || null,
-    },
-    webVitals: {
-      fcp_avg_ms: m.browser_web_vital_fcp?.values?.avg?.toFixed(2) || null,
-      lcp_avg_ms: m.browser_web_vital_lcp?.values?.avg?.toFixed(2) || null,
-      cls_avg: m.browser_web_vital_cls?.values?.avg?.toFixed(4) || null,
-      ttfb_avg_ms: m.browser_web_vital_ttfb?.values?.avg?.toFixed(2) || null,
-      fid_avg_ms: m.browser_web_vital_fid?.values?.avg?.toFixed(2) || null,
-      inp_avg_ms: m.browser_web_vital_inp?.values?.avg?.toFixed(2) || null,
-    },
-    checks: reporting.extractChecks(data),
   };
-
-  const outputPath = OUTPUT_FILE || reporting.generateOutputPath("aspen-browser", TEST_NUMBER);
-
-  return {
-    stdout: textSummary(data, { indent: "  ", enableColors: true }) + `\n  Output: ${outputPath}\n`,
-    [outputPath]: JSON.stringify(summary, null, 2),
-  };
+  const out = { stdout: textSummary(data, { indent: " ", enableColors: true }) };
+  if (OUTPUT_FILE) out[OUTPUT_FILE] = JSON.stringify(summary, null, 2);
+  return out;
 }
