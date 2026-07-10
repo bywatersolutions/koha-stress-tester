@@ -42,6 +42,7 @@ my $API = "https://api.k6.io/loadtests/v2/tests";
 # script file => cloud test name. These names are the templates people clone.
 my @SYNC_TESTS = (
     [ "koha_opac_http.js",         "OPAC Stress Test - HTTP Only" ],
+    [ "koha_opac_browser.js",      "OPAC Stress Test - Browser" ],
     [ "koha_steady_state.js",      "Daily Operations" ],
     [ "koha_training_protocol.js", "Training Simulation - HTTP Only" ],
     [ "koha_training_browser.js",  "Training Simulation - End to End" ],
