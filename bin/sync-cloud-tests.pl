@@ -17,6 +17,16 @@
 #   ./bin/sync-cloud-tests.pl opac daily      # only tests whose script/name matches
 #   ./bin/sync-cloud-tests.pl --project 12345 # override CLOUD_PROJECT_ID
 #   ./bin/sync-cloud-tests.pl --env prod.env  # read CLOUD_PROJECT_ID from another file
+#   ./bin/sync-cloud-tests.pl --set OPAC_URL=https://x --set LIBRARIANS=40  # bake per-project defaults
+#   ./bin/sync-cloud-tests.pl --recreate                      # delete+recreate ( keeps UI Run armed )
+#
+# --recreate deletes each existing test and creates it fresh instead of updating
+# in place - an API update leaves the UI Run button needing a run, a fresh
+# create does not ( at the cost of that test's run history ).
+#
+# --set VAR=VALUE ( repeatable ) rewrites a script's "|| default" for that VAR
+# before pushing, so a project's tests come pre-configured for that server.
+# Secrets are never baked - they stay on the universal named secrets.
 #
 # Auth: reuses the token from 'k6 cloud login' ( ~/Library/Application Support/
 # k6/config.json ). Run that once first.
@@ -39,11 +49,14 @@ my @SYNC_TESTS = (
 
 my $bench_dir = "$FindBin::Bin/../benchmarks";
 my $env_file  = "$FindBin::Bin/../.env";
-my ( $project_override, $dry_run, $help );
+my ( $project_override, $dry_run, $recreate, $help );
+my %overrides;
 
 GetOptions(
     'env=s'     => \$env_file,
     'project=s' => \$project_override,
+    'set=s%'    => \%overrides,
+    'recreate'  => \$recreate,
     'dry-run'   => \$dry_run,
     'help'      => \$help,
 ) or die "Try --help\n";
@@ -76,6 +89,7 @@ my %existing;
 say "=" x 42;
 say "Syncing script-editor templates  (project $project_id)";
 say "  DRY RUN - nothing will be written" if $dry_run;
+say "  Baking: " . join( ", ", map {"$_=$overrides{$_}"} sort keys %overrides ) if %overrides;
 say "=" x 42;
 
 my ( $done, $fails ) = ( 0, 0 );
@@ -91,13 +105,23 @@ for my $entry (@SYNC_TESTS) {
         next;
     }
 
-    my $tid    = $existing{$name};
-    my $action = $tid ? "update" : "create";
+    my $tid = $existing{$name};
+    my $action;
+    if ( $tid && $recreate ) {
+        # Delete then create fresh so the test's UI Run button stays armed ( an
+        # API update leaves it needing a run ). Loses that test's run history.
+        $action = "recreate";
+        _api( 'DELETE', "$API/$tid" ) unless $dry_run;
+        $tid = undef;
+    } else {
+        $action = $tid ? "update" : "create";
+    }
     say "\n>> $name";
     say "   $file  ->  $action" . ( $tid ? " (id $tid)" : "" );
     next if $dry_run;
 
     my $script = _slurp($path);
+    $script = _bake( $script, \%overrides ) if %overrides;
     my $res;
     if ($tid) {
         $res = _api( 'PATCH', "$API/$tid", { script => $script } );
@@ -167,6 +191,23 @@ sub _slurp {
     open my $fh, '<', $path or die "Cannot read $path: $!\n";
     local $/;
     return <$fh>;
+}
+
+# Rewrite each "__ENV.VAR || default" with the caller's value so a project's
+# tests come pre-configured. Handles the string form ( __ENV.VAR || "..." ) and
+# the numeric form ( parse*(__ENV.VAR) || 123 ). A VAR not present in a given
+# script is left untouched. Secrets are never passed here.
+sub _bake {
+    my ( $script, $overrides ) = @_;
+    for my $var ( keys %$overrides ) {
+        my $val = $overrides->{$var};
+        my $ev  = quotemeta($var);
+        my $q   = $val;
+        $q =~ s/(["\\])/\\$1/g;    # escape for a JS string literal
+        $script =~ s/(__ENV\.$ev\s*\|\|\s*)"[^"]*"/$1"$q"/g;                    # string default
+        $script =~ s/(__ENV\.$ev\)\s*\|\|\s*)-?[0-9]+(?:\.[0-9]+)?/$1$val/g;    # numeric default
+    }
+    return $script;
 }
 
 sub _short { my ($s) = @_; $s //= ''; $s =~ s/\s+/ /g; return substr( $s, 0, 200 ); }
