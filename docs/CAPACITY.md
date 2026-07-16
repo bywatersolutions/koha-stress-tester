@@ -1,7 +1,7 @@
 # Capacity model: how many concurrent staff a Koha box holds
 
 The training-session tests (`koha_training_browser.js`, `koha_training_protocol.js`)
-don't just pass or fail - run them up a ladder of `LIBRARIANS` values and they
+don't just pass or fail - run them up a ladder of `TRAINING_ATTENDEES` values and they
 map a server's saturation curve. This note is the model that curve follows,
 how to read it, and the worked example from PWPL.
 
@@ -41,7 +41,7 @@ drives hundreds of VUs):
 
 ```bash
 for N in 25 50 75 100; do
-  LIBRARIANS=$N ./bin/run-with-env.sh          # protocol test, STEP_INTERVAL_S=30
+  TRAINING_ATTENDEES=$N ./bin/run-with-env.sh          # protocol test, STEP_INTERVAL_S=30
 done
 ```
 
@@ -135,7 +135,7 @@ go-live.
 
 - These numbers are the **lockstep worst case** (everyone acts together). Daily
   operations at the same headcount are far lighter.
-- At large `LIBRARIANS`, the tests' setup screens many records via sequential
+- At large `TRAINING_ATTENDEES`, the tests' setup screens many records via sequential
   REST calls; raise `SETUP_TIMEOUT_S` (default 600) if setup is slow, and on
   macOS raise the shell `ulimit -n` before very large local runs.
 - The protocol test reproduces the dynamic CGI/REST load the origin sees

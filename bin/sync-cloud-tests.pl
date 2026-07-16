@@ -16,7 +16,7 @@
 #   ./bin/sync-cloud-tests.pl opac daily      # only tests whose script/name matches
 #   ./bin/sync-cloud-tests.pl --project 12345 # override CLOUD_PROJECT_ID
 #   ./bin/sync-cloud-tests.pl --env prod.env  # read CLOUD_PROJECT_ID from another file
-#   ./bin/sync-cloud-tests.pl --set OPAC_URL=https://x --set LIBRARIANS=40  # bake per-project defaults
+#   ./bin/sync-cloud-tests.pl --set OPAC_URL=https://x --set TRAINING_ATTENDEES=40  # bake per-project defaults
 #   ./bin/sync-cloud-tests.pl --recreate                      # delete+recreate ( keeps UI Run armed )
 #
 # --recreate deletes each existing test and creates it fresh instead of updating

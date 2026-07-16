@@ -2,7 +2,7 @@
 
 `benchmarks/koha_training_browser.js` answers one question: **will this Koha
 server survive a training class?** A class is not average load - it is
-LIBRARIANS people doing the *same thing at the same moment* because the
+TRAINING_ATTENDEES people doing the *same thing at the same moment* because the
 trainer just said "now click Check out". The test reproduces exactly that:
 one real Chromium browser per attendee, all pacing through a shared
 curriculum on a trainer clock (`STEP_INTERVAL_S` between ticks, a few seconds
@@ -62,7 +62,7 @@ fine, which shows up as per-step max/p95 blowing out.
   record selection, and the **`RESTBasicAuth` system preference enabled** -
   it's off by default, and without it every API call fails with
   `401 Basic authentication disabled`.
-- Enough existing records: `LIBRARIANS + 1` active patrons and available
+- Enough existing records: `TRAINING_ATTENDEES + 1` active patrons and available
   items. `LIBRARY_ID` / `PATRON_CATEGORY_ID` scope the selection to a branch
   or category; leave blank to pick from the whole catalog.
 - Circulation rules on the target must allow the selected patrons to check
@@ -118,7 +118,7 @@ One-time setup (per Grafana Cloud stack, e.g. `bws.grafana.net`):
 Per-certification run:
 
 ```bash
-cp env-templates/training.env .env    # edit STAFF_URL, LIBRARIANS, CLOUD_PROJECT_ID
+cp env-templates/training.env .env    # edit STAFF_URL, TRAINING_ATTENDEES, CLOUD_PROJECT_ID
 ./bin/run-with-env.sh --cloud         # k6 cloud run: archives script + data, executes on cloud runners
 ```
 
@@ -142,7 +142,7 @@ Private Load Zones (k6-operator in Kubernetes) replace the local generator.
   personal.
 - The repeatable procedure per new partner deployment is: clone this repo,
   `cp env-templates/training.env .env`, set `STAFF_URL` (+ host header,
-  superlibrarian credentials, `LIBRARIANS`, `CLOUD_PROJECT_ID`),
+  superlibrarian credentials, `TRAINING_ATTENDEES`, `CLOUD_PROJECT_ID`),
   `k6 cloud login --token <their token>` once, then
   `./bin/run-with-env.sh --cloud`.
 - A re-run from the k6 app UI replays the uploaded archive with the same

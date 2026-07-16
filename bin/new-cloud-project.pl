@@ -36,11 +36,11 @@ my @CONFIG_VARS = (
     { name => 'OPAC_URL',                    desc => 'Public catalog (OPAC) base URL to test',                              default => 'https://catalog.example.org' },
     { name => 'STAFF_URL',                   desc => 'Staff interface base URL (login-based tests)',                        default => 'https://staff.example.org' },
     { name => 'STAFF_USER',                  desc => 'Superlibrarian username for the login-based tests',                   default => 'bwssupport' },
-    { name => 'BASE_URL',                    desc => 'Aspen Discovery base URL for the Aspen tests (leave blank if the library has no Aspen)', default => '' },
+    { name => 'ASPEN_BASE_URL',              desc => 'Aspen Discovery base URL for the Aspen tests (leave blank if the library has no Aspen)', default => '' },
     { name => 'OPAC_SEARCHES_PER_HOUR',      desc => 'Peak OPAC catalog searches per hour to sustain',                      default => '5000', num => 1 },
     { name => 'STAFF_TRANSACTIONS_PER_HOUR', desc => 'Staff transactions per hour (Daily Operations test)',                 default => '1000', num => 1 },
     { name => 'PATRON_MODE',                 desc => "Patron catalog shape: 'opac' (direct Koha OPAC) or 'aspen' (Aspen REST API load)", default => 'aspen' },
-    { name => 'LIBRARIANS',                  desc => 'Training class size (number of attendees)',                           default => '50', num => 1 },
+    { name => 'TRAINING_ATTENDEES',          desc => 'Training class size (number of attendees)',                           default => '50', num => 1 },
     { name => 'CATALOG_SEARCH_TERM',         desc => 'A search term with hits in the target catalog',                       default => 'harry potter' },
 );
 

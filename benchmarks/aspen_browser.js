@@ -25,8 +25,8 @@ import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 //    RUN CONFIG block below, then click Run.
 // ══════════════════════════════════════════════════════════════════════
 // ─── RUN CONFIG ( edit these ) ────────────────────────────────────────
-const BASE_URL = __ENV.BASE_URL || "https://aspen.localhost"; // <<< SET: Aspen Discovery URL to test
-const HOST_HEADER = __ENV.HOST_HEADER || ""; // <<< SET: Host header if Aspen is behind a proxy ( blank if not )
+const ASPEN_BASE_URL = __ENV.ASPEN_BASE_URL || "https://aspen.localhost"; // <<< SET: Aspen Discovery URL to test
+const ASPEN_HOST_HEADER = __ENV.ASPEN_HOST_HEADER || ""; // <<< SET: Host header if Aspen is behind a proxy ( blank if not )
 const ASPEN_BROWSERS = parseInt(__ENV.ASPEN_BROWSERS) || 5; // <<< SET: concurrent real browsers ( keep small )
 const SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter"; // <<< SET: a term with hits in the target catalog
 // ──────────────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ async function resolveToken() {
 async function pageExtraHeaders(page) {
   const h = {};
   if (RESOLVED_TOKEN) h[EXTERNAL_SERVICE_HEADER] = RESOLVED_TOKEN;
-  if (HOST_HEADER) h["Host"] = HOST_HEADER;
+  if (ASPEN_HOST_HEADER) h["Host"] = ASPEN_HOST_HEADER;
   if (Object.keys(h).length) await page.setExtraHTTPHeaders(h);
 }
 
@@ -98,8 +98,8 @@ export async function setup() {
   console.log("========================================");
   console.log("ASPEN BROWSER TEST");
   console.log("========================================");
-  console.log(`BASE_URL: ${BASE_URL}`);
-  if (HOST_HEADER) console.log(`HOST_HEADER: ${HOST_HEADER}`);
+  console.log(`ASPEN_BASE_URL: ${ASPEN_BASE_URL}`);
+  if (ASPEN_HOST_HEADER) console.log(`ASPEN_HOST_HEADER: ${ASPEN_HOST_HEADER}`);
   console.log(`ASPEN_BROWSERS: ${Math.min(100, Math.max(1, ASPEN_BROWSERS))} | duration ${DURATION}`);
   console.log(`Search term: "${SEARCH_TERM}"`);
   console.log(
@@ -140,7 +140,7 @@ export default async function (data) {
   try {
     // 1) Aspen home
     const home = await runStep("home", async () => {
-      await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+      await page.goto(ASPEN_BASE_URL, { waitUntil: "domcontentloaded" });
       await page.locator('#lookfor, input[name="lookfor"]').first().waitFor({ state: "visible" });
     });
     if (!home) return;
@@ -183,7 +183,7 @@ export function handleSummary(data) {
   };
   const summary = {
     metadata: { testScript: "aspen_browser.js", testNumber: TEST_NUMBER },
-    config: { baseUrl: BASE_URL, browsers: Math.min(100, Math.max(1, ASPEN_BROWSERS)), searchTerm: SEARCH_TERM, stepP95Ms: STEP_P95_MS },
+    config: { baseUrl: ASPEN_BASE_URL, browsers: Math.min(100, Math.max(1, ASPEN_BROWSERS)), searchTerm: SEARCH_TERM, stepP95Ms: STEP_P95_MS },
     result: {
       checksRate: m.checks ? (m.checks.values.rate * 100).toFixed(1) + "%" : null,
       iterations: m.iterations?.values?.count,

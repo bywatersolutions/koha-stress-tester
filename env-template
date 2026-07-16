@@ -37,10 +37,10 @@ K6_IMAGE_TAG=latest
 # ============================================================
 
 # Aspen Discovery (aspen_browser.js, aspen_http.js)
-BASE_URL=https://localhost
-# If BASE_URL is localhost, set HOST_HEADER to the real domain
+ASPEN_BASE_URL=https://localhost
+# If ASPEN_BASE_URL is localhost, set ASPEN_HOST_HEADER to the real domain
 # Comment this out if hitting the domain directly
-HOST_HEADER=INST.aspendiscovery.org
+ASPEN_HOST_HEADER=INST.aspendiscovery.org
 
 # Solr (solr_http.js)
 # Default port is 8983 for Solr Cloud; standalone Solr may use 8080

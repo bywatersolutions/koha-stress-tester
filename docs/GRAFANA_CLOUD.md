@@ -37,11 +37,11 @@ default) for each setting — press Enter to accept a default:
 | `OPAC_URL` | the Koha OPAC tests |
 | `STAFF_URL` | the staff / training tests |
 | `STAFF_USER` | superlibrarian username for the login tests (default `bwssupport`) |
-| `BASE_URL` | the Aspen tests — the library's Aspen Discovery URL (leave blank if none) |
+| `ASPEN_BASE_URL` | the Aspen tests — the library's Aspen Discovery URL (leave blank if none) |
 | `OPAC_SEARCHES_PER_HOUR` | the OPAC HTTP load rate |
 | `STAFF_TRANSACTIONS_PER_HOUR` | the Daily Operations load rate |
 | `PATRON_MODE` | `aspen` or `opac` — how Daily Operations simulates patron load |
-| `LIBRARIANS` | training class size |
+| `TRAINING_ATTENDEES` | training class size |
 | `CATALOG_SEARCH_TERM` | a term with hits in the catalog (browser tests) |
 
 Credentials are **not** prompted — they stay on the org-wide secrets (below).
@@ -80,7 +80,7 @@ changes, push the update to an existing project with:
 ./bin/sync-cloud-tests.pl --project <ID>                    # update all, in place
 ./bin/sync-cloud-tests.pl --project <ID> --dry-run
 ./bin/sync-cloud-tests.pl --project <ID> opac aspen         # filter by name/script
-./bin/sync-cloud-tests.pl --project <ID> --set BASE_URL=https://x   # re-bake a value
+./bin/sync-cloud-tests.pl --project <ID> --set ASPEN_BASE_URL=https://x   # re-bake a value
 ```
 
 It talks to the k6 Cloud REST API (reusing your `k6 cloud login` token) and

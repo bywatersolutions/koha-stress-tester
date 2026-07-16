@@ -128,19 +128,19 @@ case "$BENCH" in
         echo "  MAX_VUS: $(env_val MAX_VUS 150)"
         ;;
     aspen_http.js)
-        echo "  BASE_URL: $(env_val BASE_URL "not set")"
-        echo "  HOST_HEADER: $(env_val HOST_HEADER "not set")"
+        echo "  ASPEN_BASE_URL: $(env_val ASPEN_BASE_URL "not set")"
+        echo "  ASPEN_HOST_HEADER: $(env_val ASPEN_HOST_HEADER "not set")"
         echo "  MAX_VUS: $(env_val MAX_VUS 150)"
         ;;
     aspen_browser.js|koha.js)
-        echo "  BASE_URL: $(env_val BASE_URL "not set")"
+        echo "  ASPEN_BASE_URL: $(env_val ASPEN_BASE_URL "not set")"
         echo "  VUS: $(env_val VUS 1)"
         echo "  ITERATIONS: $(env_val ITERATIONS 1)"
         echo "  K6_BROWSER_HEADLESS: $(env_val K6_BROWSER_HEADLESS true)"
         ;;
     koha_training_browser.js)
         echo "  STAFF_URL: $(env_val STAFF_URL "not set")"
-        echo "  LIBRARIANS: $(env_val LIBRARIANS 75)"
+        echo "  TRAINING_ATTENDEES: $(env_val TRAINING_ATTENDEES 75)"
         echo "  STEP_INTERVAL_S: $(env_val STEP_INTERVAL_S 90)"
         echo "  K6_BROWSER_HEADLESS: $(env_val K6_BROWSER_HEADLESS true)"
         ;;

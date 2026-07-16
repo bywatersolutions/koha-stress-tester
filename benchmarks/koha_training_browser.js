@@ -1,7 +1,7 @@
 /**
  * koha_training_browser.js - Koha Training Session Browser Test
  *
- * Simulates a training class: LIBRARIANS people all doing the same staff-client
+ * Simulates a training class: TRAINING_ATTENDEES people all doing the same staff-client
  * exercise at the same time, each in their own real Chromium browser. The load
  * shape that matters here is the lockstep burst - the trainer says "now click
  * Check Out" and every attendee hits the same endpoint within a few seconds -
@@ -22,7 +22,7 @@
  * Requirements:
  * - k6 binary with browser support (not Docker); Chromium/Chrome installed
  * - A superlibrarian login (STAFF_USER/STAFF_PASS) for API record selection
- * - A target with enough active patrons and available items (LIBRARIANS + 1
+ * - A target with enough active patrons and available items (TRAINING_ATTENDEES + 1
  *   of each); use LIBRARY_ID / PATRON_CATEGORY_ID to scope the selection
  * - Still not a production server: real patrons get transient checkouts on
  *   their accounts (think checkout notices), so use the staging clone
@@ -47,7 +47,7 @@ import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 //  ▶ HOW TO RUN: clone this test ( Save as… ), set the values in the
 //    RUN CONFIG block below, then click Run.
 //    Needs a superlibrarian login on the target ( RESTBasicAuth enabled ).
-//    This is a browser test - it runs real Chromium. LIBRARIANS is the class
+//    This is a browser test - it runs real Chromium. TRAINING_ATTENDEES is the class
 //    size; it runs a BROWSER_RATIO fraction of that as real browsers ( the
 //    HTTP test koha_training_protocol.js carries the full-class load ).
 // ══════════════════════════════════════════════════════════════════════
@@ -55,7 +55,7 @@ import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 const STAFF_URL = __ENV.STAFF_URL || "http://kohadev-intra.localhost"; // <<< SET: staff interface URL of the server to test
 const STAFF_USER = __ENV.STAFF_USER || "koha"; // <<< SET: superlibrarian username
 const STAFF_PASS_ENV = __ENV.STAFF_PASS || ""; // <<< SET: superlibrarian password ( or leave "" to use the org 'staff-pass' secret )
-const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75; // <<< SET: class size ( number of attendees )
+const TRAINING_ATTENDEES = parseInt(__ENV.TRAINING_ATTENDEES) || 75; // <<< SET: class size ( number of attendees )
 const BROWSER_RATIO = parseFloat(__ENV.BROWSER_RATIO) || 0.33; // <<< SET: fraction of the class run as real browsers
 const CATALOG_SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter"; // <<< SET: a term with hits in the target catalog
 // ──────────────────────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ const STAFF_PASS_SECRET = __ENV.STAFF_PASS_SECRET || "staff-pass";
 const BROWSER_VU_HARD_CAP = 100;
 const BROWSER_VUS = Math.min(
   BROWSER_VU_HARD_CAP,
-  Math.max(1, parseInt(__ENV.BROWSER_VUS) || Math.ceil(LIBRARIANS * BROWSER_RATIO)),
+  Math.max(1, parseInt(__ENV.BROWSER_VUS) || Math.ceil(TRAINING_ATTENDEES * BROWSER_RATIO)),
 );
 
 // Trainer pacing. Scan-and-click steps use STEP_JITTER_S; typing steps spread
@@ -193,7 +193,7 @@ if (CLOUD_ZONES) {
 export const options = {
   cloud: cloudConfig,
   // Setup screens existing records via many sequential REST calls; at large
-  // LIBRARIANS this exceeds k6's default 60s, so make it generous
+  // TRAINING_ATTENDEES this exceeds k6's default 60s, so make it generous
   setupTimeout: `${parseInt(__ENV.SETUP_TIMEOUT_S) || 600}s`,
   scenarios: {
     training: {
@@ -305,7 +305,7 @@ export async function setup() {
   if (STAFF_HOST_HEADER) {
     console.log(`STAFF_HOST_HEADER: ${STAFF_HOST_HEADER}`);
   }
-  console.log(`LIBRARIANS: ${LIBRARIANS} (class size)`);
+  console.log(`TRAINING_ATTENDEES: ${TRAINING_ATTENDEES} (class size)`);
   console.log(
     `Browser VUs: ${BROWSER_VUS}` +
       (__ENV.BROWSER_VUS ? " (BROWSER_VUS override)" : ` (${BROWSER_RATIO} of the class)`) +
@@ -836,7 +836,7 @@ export function handleSummary(data) {
     config: {
       staffUrl: STAFF_URL,
       staffHostHeader: STAFF_HOST_HEADER || "(not set)",
-      librarians: LIBRARIANS,
+      librarians: TRAINING_ATTENDEES,
       browserVus: BROWSER_VUS,
       stepIntervalS: STEP_INTERVAL_S,
       stepJitterS: STEP_JITTER_S,

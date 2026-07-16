@@ -42,7 +42,7 @@ import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 const STAFF_URL = __ENV.STAFF_URL || "http://kohadev-intra.localhost"; // <<< SET: staff interface URL of the server to test
 const STAFF_USER = __ENV.STAFF_USER || "koha"; // <<< SET: superlibrarian username
 const STAFF_PASS_ENV = __ENV.STAFF_PASS || ""; // <<< SET: superlibrarian password ( or leave "" to use the org 'staff-pass' secret )
-const LIBRARIANS = parseInt(__ENV.LIBRARIANS) || 75; // <<< SET: how many attendees ( concurrent logged-in staff )
+const TRAINING_ATTENDEES = parseInt(__ENV.TRAINING_ATTENDEES) || 75; // <<< SET: how many attendees ( concurrent logged-in staff )
 const CATALOG_SEARCH_TERM = __ENV.CATALOG_SEARCH_TERM || "harry potter"; // <<< SET: a term with hits in the target catalog
 // ──────────────────────────────────────────────────────────────────────
 // Derived / internal
@@ -121,12 +121,12 @@ if (CLOUD_ZONES) {
 export const options = {
   cloud: cloudConfig,
   // Setup screens existing records via many sequential REST calls; at large
-  // LIBRARIANS this exceeds k6's default 60s, so make it generous
+  // TRAINING_ATTENDEES this exceeds k6's default 60s, so make it generous
   setupTimeout: `${parseInt(__ENV.SETUP_TIMEOUT_S) || 600}s`,
   scenarios: {
     training: {
       executor: "per-vu-iterations",
-      vus: LIBRARIANS,
+      vus: TRAINING_ATTENDEES,
       iterations: 1,
       maxDuration: `${STARTUP_GRACE_S + LOGIN_JITTER_S + STEPS.length * STEP_INTERVAL_S + 300}s`,
       gracefulStop: "30s",
@@ -231,10 +231,10 @@ export async function setup() {
   console.log("KOHA TRAINING SESSION PROTOCOL TEST");
   console.log("========================================");
   console.log(`STAFF_URL: ${STAFF_URL}`);
-  console.log(`LIBRARIANS: ${LIBRARIANS}`);
+  console.log(`TRAINING_ATTENDEES: ${TRAINING_ATTENDEES}`);
   console.log(`STEP_INTERVAL_S: ${STEP_INTERVAL_S} (jitter ${STEP_JITTER_S}s, typing jitter ${TYPING_JITTER_S}s, login window ${LOGIN_JITTER_S}s, startup grace ${STARTUP_GRACE_S}s)`);
   console.log(`Curriculum: ${STEPS.join(" -> ")}`);
-  console.log(`Logins: ${TRAINING_USER_PREFIX ? `${TRAINING_USER_PREFIX}1..${TRAINING_USER_PREFIX}${LIBRARIANS}` : `shared (${STAFF_USER})`}`);
+  console.log(`Logins: ${TRAINING_USER_PREFIX ? `${TRAINING_USER_PREFIX}1..${TRAINING_USER_PREFIX}${TRAINING_ATTENDEES}` : `shared (${STAFF_USER})`}`);
   console.log(`${EXTERNAL_SERVICE_HEADER}: ${token ? `set (${EXTERNAL_SERVICE_TOKEN ? "from env" : "from Grafana Cloud secret"})` : "not sent"}`);
   await staffPassword();
   console.log(`STAFF_PASS: ${STAFF_PASS_ENV ? "from env" : cachedPassword === "koha" ? "default (koha)" : `from Grafana Cloud secret '${STAFF_PASS_SECRET}'`}`);
@@ -269,7 +269,7 @@ export async function setup() {
     throw new Error("Could not determine the staff user's branch; set LIBRARY_ID");
   }
 
-  const wanted = LIBRARIANS + 1;
+  const wanted = TRAINING_ATTENDEES + 1;
 
   const patronFilter = {};
   if (PATRON_CATEGORY_ID) patronFilter.category_id = PATRON_CATEGORY_ID;
@@ -311,7 +311,7 @@ export async function setup() {
   if (items.length < wanted) {
     throw new Error(`Need ${wanted} available existing items but found ${items.length}; adjust LIBRARY_ID`);
   }
-  console.log(`Selected ${LIBRARIANS} existing patrons and ${LIBRARIANS} available items (plus a spare pair); staff branch ${staffBranch}`);
+  console.log(`Selected ${TRAINING_ATTENDEES} existing patrons and ${TRAINING_ATTENDEES} available items (plus a spare pair); staff branch ${staffBranch}`);
 
   const sparePatron = patrons.pop();
   const spareItem = items.pop();
@@ -626,7 +626,7 @@ export function handleSummary(data) {
     metadata: { testScript: "koha_training_protocol.js", testNumber: TEST_NUMBER, timestamp: new Date().toISOString() },
     config: {
       staffUrl: STAFF_URL,
-      librarians: LIBRARIANS,
+      librarians: TRAINING_ATTENDEES,
       stepIntervalS: STEP_INTERVAL_S,
       loginJitterS: LOGIN_JITTER_S,
       stepP95Ms: STEP_P95_MS,

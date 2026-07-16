@@ -86,8 +86,8 @@ REST API and just need `k6 cloud login` done once. See
    GID=1000
 
    # Target URLs and credentials - CONFIGURE THESE
-   BASE_URL=https://your-aspen-instance.org
-   HOST_HEADER=your-aspen-instance.org  # Comment out if not needed
+   ASPEN_BASE_URL=https://your-aspen-instance.org
+   ASPEN_HOST_HEADER=your-aspen-instance.org  # Comment out if not needed
 
    SOLR_URL=http://your-solr-server:8983
    SOLR_CORE=grouped_works
@@ -122,7 +122,7 @@ The `bin/run-with-env.sh` script reads your `.env` file and passes all variables
 env $(grep -v '^#' .env | xargs) k6 run benchmarks/aspen_http.js
 
 # Or pass variables directly
-k6 run -e BASE_URL=https://my-catalog.org -e MAX_VUS=100 benchmarks/aspen_http.js
+k6 run -e ASPEN_BASE_URL=https://my-catalog.org -e MAX_VUS=100 benchmarks/aspen_http.js
 ```
 
 ### Browser Tests (k6 Binary Only)
@@ -139,7 +139,7 @@ Browser tests require the k6 binary and Chromium installed on your system - they
 ./bin/run-with-env.sh aspen_browser.js
 
 # Or manually:
-K6_BROWSER_HEADLESS=false k6 run -e BASE_URL=https://your-instance.org -e VUS=1 -e ITERATIONS=2 benchmarks/aspen_browser.js
+K6_BROWSER_HEADLESS=false k6 run -e ASPEN_BASE_URL=https://your-instance.org -e VUS=1 -e ITERATIONS=2 benchmarks/aspen_browser.js
 ```
 
 ## Test Profiles
@@ -286,7 +286,7 @@ See `helm/k6-benchmark/README.md` for full configuration options.
 
 ### Requests not hitting the expected domain
 
-Comment out the `HOST_HEADER` variable in your `.env` file. The `HOST_HEADER` is only needed when testing via localhost with a custom Host header.
+Comment out the `ASPEN_HOST_HEADER` variable in your `.env` file. The `ASPEN_HOST_HEADER` is only needed when testing via localhost with a custom Host header.
 
 ### 403 Forbidden / Cloudflare blocking requests
 
@@ -300,7 +300,7 @@ If the target site has Cloudflare or similar protection, automated requests may 
    100.x.x.x  your-aspen-instance.aspendiscovery.org
    ```
 
-3. Set `BASE_URL` to use the domain name (which now resolves to your direct route)
+3. Set `ASPEN_BASE_URL` to use the domain name (which now resolves to your direct route)
 
 This allows you to test the actual domain while bypassing Cloudflare's bot protection.
 

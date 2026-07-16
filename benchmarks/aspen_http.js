@@ -27,8 +27,8 @@ function randomElement(arr) {
 //    RUN CONFIG block below, then click Run.
 // ══════════════════════════════════════════════════════════════════════
 // ─── RUN CONFIG ( edit these ) ────────────────────────────────────────
-const BASE_URL = __ENV.BASE_URL || "https://aspen.localhost"; // <<< SET: Aspen Discovery URL to test
-const HOST_HEADER = __ENV.HOST_HEADER || ""; // <<< SET: Host header if Aspen is behind a proxy ( blank if not )
+const ASPEN_BASE_URL = __ENV.ASPEN_BASE_URL || "https://aspen.localhost"; // <<< SET: Aspen Discovery URL to test
+const ASPEN_HOST_HEADER = __ENV.ASPEN_HOST_HEADER || ""; // <<< SET: Host header if Aspen is behind a proxy ( blank if not )
 const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300; // <<< SET: peak concurrent virtual users to ramp up to
 // ──────────────────────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ const baseHeaders = {
   "User-Agent": "k6-stress-test",
   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 };
-if (HOST_HEADER) baseHeaders["Host"] = HOST_HEADER;
+if (ASPEN_HOST_HEADER) baseHeaders["Host"] = ASPEN_HOST_HEADER;
 if (RESOLVED_TOKEN) baseHeaders[EXTERNAL_SERVICE_HEADER] = RESOLVED_TOKEN;
 
 const params = {
@@ -174,8 +174,8 @@ export async function setup() {
   console.log(`========================================`);
   console.log(`ASPEN HTTP BENCHMARK TEST`);
   console.log(`========================================`);
-  console.log(`BASE_URL: ${BASE_URL}`);
-  if (HOST_HEADER) console.log(`HOST_HEADER: ${HOST_HEADER}`);
+  console.log(`ASPEN_BASE_URL: ${ASPEN_BASE_URL}`);
+  if (ASPEN_HOST_HEADER) console.log(`ASPEN_HOST_HEADER: ${ASPEN_HOST_HEADER}`);
   console.log(`${EXTERNAL_SERVICE_HEADER}: ${RESOLVED_TOKEN ? `set (${EXTERNAL_SERVICE_TOKEN ? "from env" : "from Grafana Cloud secret"})` : "not sent"}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
@@ -188,9 +188,9 @@ export async function setup() {
   console.log(`SOLR_URL: ${SOLR_URL || "(not configured)"}`);
   console.log(`========================================`);
 
-  const homeTest = http.get(BASE_URL, params);
+  const homeTest = http.get(ASPEN_BASE_URL, params);
   if (homeTest.status !== 200) {
-    console.warn(`WARNING: connectivity test failed (status=${homeTest.status}). Check BASE_URL.`);
+    console.warn(`WARNING: connectivity test failed (status=${homeTest.status}). Check ASPEN_BASE_URL.`);
   } else {
     console.log(`connectivity OK`);
   }
@@ -223,13 +223,13 @@ export default function (data) {
 
   const searchTerm = randomElement(SEARCH_TERMS);
 
-  const homeRes = http.get(BASE_URL, params);
+  const homeRes = http.get(ASPEN_BASE_URL, params);
   logRequestStatus(homeRes, "homepage", currentVUs);
   check(homeRes, { "homepage loaded": (r) => r.status === 200 });
 
   thinkTime(3);
 
-  const searchUrl = `${BASE_URL}/Union/Search?view=list&lookfor=${encodeURIComponent(searchTerm)}&searchIndex=Keyword&searchSource=local`;
+  const searchUrl = `${ASPEN_BASE_URL}/Union/Search?view=list&lookfor=${encodeURIComponent(searchTerm)}&searchIndex=Keyword&searchSource=local`;
   const searchRes = http.get(searchUrl, params);
   logRequestStatus(searchRes, `search "${searchTerm}"`, currentVUs);
   check(searchRes, {
@@ -252,7 +252,7 @@ export default function (data) {
   for (let i = 0; i < clickCount; i++) {
     const idx = Math.floor(Math.random() * resultLinks.length);
     let recordUrl = resultLinks[idx];
-    if (recordUrl.startsWith("/")) recordUrl = `${BASE_URL}${recordUrl}`;
+    if (recordUrl.startsWith("/")) recordUrl = `${ASPEN_BASE_URL}${recordUrl}`;
 
     const recordRes = http.get(recordUrl, params);
     logRequestStatus(recordRes, "record", currentVUs);
@@ -296,8 +296,8 @@ export function handleSummary(data) {
       timestamp: new Date().toISOString(),
     },
     config: {
-      baseUrl: BASE_URL,
-      hostHeader: HOST_HEADER || "(not set)",
+      baseUrl: ASPEN_BASE_URL,
+      hostHeader: ASPEN_HOST_HEADER || "(not set)",
       maxVUs: MAX_VUS,
       vuStep: VU_STEP,
       rampTime: RAMP_TIME,
