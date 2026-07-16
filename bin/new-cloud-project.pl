@@ -1,22 +1,32 @@
 #!/usr/bin/perl
 
 # new-cloud-project.pl - Create a new Grafana Cloud k6 project and fill it with
-# the Koha and Aspen stress-test templates - one command, no web-UI clicking, no
-# manual paste. Anyone with 'k6 cloud login' done can stand up a whole project
-# of pre-configured tests for a partner or engagement.
+# the right stress-test templates for the partner - one command, no web-UI
+# clicking, no manual paste.
+#
+# The partner's platform decides which patron-facing tests get created:
+#   Aspen + Koha ( default ) - patrons search Aspen Discovery; the Koha OPAC is
+#                              hit only by the Aspen API. Creates the Aspen tests
+#                              + Daily Operations ( PATRON_MODE=aspen ) + training.
+#   Koha-only ( --koha-only ) - patrons search the Koha OPAC directly. Creates
+#                              the OPAC tests + Daily Operations ( PATRON_MODE=opac )
+#                              + training.
 #
 # Usage:
-#   ./bin/new-cloud-project.pl "Partner X"   ( creates "Stress Testing - Partner X" )
+#   ./bin/new-cloud-project.pl "Partner X"              ( prompts, defaults to Aspen + Koha )
+#   ./bin/new-cloud-project.pl "Partner X" --koha-only  ( Koha-only, no Aspen tests )
+#   ./bin/new-cloud-project.pl "Partner X" --aspen      ( force Aspen + Koha, no prompt )
 #   ./bin/new-cloud-project.pl "Foo" --org 3432454 --dry-run
 #   ./bin/new-cloud-project.pl "Foo" --defaults            # accept every default, no prompts
-#   ./bin/new-cloud-project.pl "Foo" --set OPAC_URL=https://x --defaults
+#   ./bin/new-cloud-project.pl "Foo" --set STAFF_URL=https://x --defaults
 #
 # Interactively prompts for each project variable ( target URLs, load rates,
 # class size... ) with an explanation and a default, then bakes the answers into
-# that project's tests so they come pre-configured for the server. Press Enter
-# to accept a default. --defaults skips the prompts; --set VAR=VALUE pre-seeds a
-# variable's default ( repeatable ). Credentials are NOT prompted - they stay on
-# the universal Grafana secrets.
+# that project's tests so they come pre-configured for the server. Only the
+# variables relevant to the chosen platform are asked. Press Enter to accept a
+# default. --defaults skips the prompts; --set VAR=VALUE pre-seeds a variable's
+# default ( repeatable ). Credentials are NOT prompted - they stay on the
+# universal Grafana secrets.
 #
 # Needs 'k6 cloud login --token <token>' once first ( token from the Grafana
 # Cloud k6 app ). See docs/GRAFANA_CLOUD.md.
@@ -31,33 +41,45 @@ use HTTP::Tiny;
 use JSON::PP;
 
 # The per-project variables prompted for and baked into the new project's tests.
+# 'mode' = which platform the variable applies to: 'both', 'aspen', or 'opac'.
 # ( Credentials are deliberately excluded - they come from universal secrets. )
 my @CONFIG_VARS = (
-    { name => 'OPAC_URL',                    desc => 'Public catalog (OPAC) base URL to test',                              default => 'https://catalog.example.org' },
-    { name => 'STAFF_URL',                   desc => 'Staff interface base URL (login-based tests)',                        default => 'https://staff.example.org' },
-    { name => 'STAFF_USER',                  desc => 'Superlibrarian username for the login-based tests',                   default => 'bwssupport' },
-    { name => 'ASPEN_BASE_URL',              desc => 'Aspen Discovery base URL for the Aspen tests (leave blank if the library has no Aspen)', default => '' },
-    { name => 'OPAC_SEARCHES_PER_HOUR',      desc => 'Peak OPAC catalog searches per hour to sustain',                      default => '5000', num => 1 },
-    { name => 'STAFF_TRANSACTIONS_PER_HOUR', desc => 'Staff transactions per hour (Daily Operations test)',                 default => '1000', num => 1 },
-    { name => 'PATRON_MODE',                 desc => "Patron catalog shape: 'opac' (direct Koha OPAC) or 'aspen' (Aspen REST API load)", default => 'aspen' },
-    { name => 'TRAINING_ATTENDEES',          desc => 'Training class size (number of attendees)',                           default => '50', num => 1 },
-    { name => 'CATALOG_SEARCH_TERM',         desc => 'A search term with hits in the target catalog',                       default => 'harry potter' },
+    { name => 'STAFF_URL',                   mode => 'both',  desc => 'Staff interface base URL (login + Daily Operations + API)',           default => 'https://staff.example.org' },
+    { name => 'STAFF_USER',                  mode => 'both',  desc => 'Superlibrarian username for the login-based tests',                   default => 'bwssupport' },
+    { name => 'OPAC_URL',                    mode => 'opac',  desc => 'Public catalog (OPAC) base URL - patrons search it directly',         default => 'https://catalog.example.org' },
+    { name => 'ASPEN_BASE_URL',              mode => 'aspen', desc => 'Aspen Discovery base URL - the patron catalog',                       default => 'https://discovery.example.org' },
+    { name => 'OPAC_SEARCHES_PER_HOUR',      mode => 'opac',  desc => 'Peak OPAC catalog searches per hour to sustain',                      default => '5000', num => 1 },
+    { name => 'PATRON_SESSIONS_PER_HOUR',    mode => 'aspen', desc => 'Patron sessions/hour (Aspen->Koha API load, Daily Operations)',       default => '2000', num => 1 },
+    { name => 'STAFF_TRANSACTIONS_PER_HOUR', mode => 'both',  desc => 'Staff transactions per hour (Daily Operations test)',                 default => '1000', num => 1 },
+    { name => 'TRAINING_ATTENDEES',          mode => 'both',  desc => 'Training class size (number of attendees)',                           default => '50', num => 1 },
+    { name => 'CATALOG_SEARCH_TERM',         mode => 'both',  desc => 'A search term with hits in the target catalog',                       default => 'harry potter' },
 );
 
-my ( $org_override, $dry_run, $help, $opt_defaults );
+# The tests created for each platform ( filenames become sync-cloud-tests.pl
+# filters ). Daily Operations + training are common; the patron-facing tests
+# differ. PATRON_MODE is baked from the platform, not prompted.
+my %TEST_SETS = (
+    aspen => [qw( aspen_http.js aspen_browser.js koha_steady_state.js koha_training_protocol.js koha_training_browser.js )],
+    opac  => [qw( koha_opac_http.js koha_opac_browser.js koha_steady_state.js koha_training_protocol.js koha_training_browser.js )],
+);
+
+my ( $org_override, $dry_run, $help, $opt_defaults, $opt_koha_only, $opt_aspen );
 my %seed;
 GetOptions(
-    'org=s'    => \$org_override,
-    'set=s%'   => \%seed,
-    'defaults' => \$opt_defaults,
-    'dry-run'  => \$dry_run,
-    'help'     => \$help,
+    'org=s'     => \$org_override,
+    'set=s%'    => \%seed,
+    'koha-only' => \$opt_koha_only,
+    'aspen'     => \$opt_aspen,
+    'defaults'  => \$opt_defaults,
+    'dry-run'   => \$dry_run,
+    'help'      => \$help,
 ) or die "Try --help\n";
 
 _usage() if $help;
+die "Pass only one of --aspen / --koha-only\n" if $opt_aspen && $opt_koha_only;
 
 my $name = shift @ARGV;
-die "Usage: $0 \"<project name>\" [--org ID] [--dry-run]\n"
+die "Usage: $0 \"<project name>\" [--koha-only] [--org ID] [--dry-run]\n"
     unless defined $name && length $name;
 die "Unexpected extra arguments: @ARGV\n" if @ARGV;
 
@@ -84,12 +106,33 @@ unless ( defined $org && length $org ) {
     $org = $orgs->[0]{id};
 }
 
-# Gather this project's settings ( prompts unless --defaults / non-interactive )
-my %settings = _prompt_settings();
+# Platform decides the patron-facing test set + PATRON_MODE. --aspen / --koha-only
+# force it; otherwise ask ( interactive ) or default to Aspen ( most libraries
+# front Koha with Aspen ). $platform is 'aspen' or 'opac' ( = PATRON_MODE value ).
+my $platform;
+if    ($opt_koha_only) { $platform = 'opac'; }
+elsif ($opt_aspen)     { $platform = 'aspen'; }
+elsif ( -t STDIN && !$opt_defaults && !$dry_run ) {
+    say "";
+    say "Platform for this partner:";
+    say "  Aspen + Koha - patrons search Aspen Discovery; the Koha OPAC is hit only by the Aspen API";
+    say "  Koha-only    - patrons search the Koha OPAC directly";
+    my $ans = _read_line( "  Use Aspen Discovery in front of Koha? [Y/n]: ", "Y" );
+    $platform = ( $ans =~ /^\s*n/i ) ? 'opac' : 'aspen';
+} else {
+    $platform = 'aspen';
+}
+my $platform_label = $platform eq 'aspen' ? 'Aspen + Koha' : 'Koha-only';
+
+# Gather this project's settings ( only the vars for this platform )
+my %settings = _prompt_settings($platform);
 
 if ($dry_run) {
-    say "\nDRY: would create project '$name' in org $org, then populate the templates with:";
-    say "  $_->{name}=$settings{ $_->{name} }" for @CONFIG_VARS;
+    say "\nDRY: would create project '$name' in org $org";
+    say "  platform: $platform_label (PATRON_MODE=$platform)";
+    say "  tests:    " . join( ", ", @{ $TEST_SETS{$platform} } );
+    say "  settings:";
+    say "    $_->{name}=$settings{ $_->{name} }" for _vars_for($platform);
     exit 0;
 }
 
@@ -100,16 +143,17 @@ die "Error: create project failed HTTP $res->{status}: " . _short( $res->{conten
     unless $res->{success};
 my $pid = decode_json( $res->{content} )->{project}{id}
     or die "Error: project created but no id returned.\n";
-say "Created project '$name' (id $pid) in org $org";
+say "Created project '$name' (id $pid) in org $org  [$platform_label]";
 
-# Populate the templates, baking in this project's settings
-say "\nPopulating the templates into project $pid ...";
-my $sync = "$FindBin::Bin/sync-cloud-tests.pl";
-# Only bake vars the user actually gave a value for; a blank ( e.g. no Aspen )
-# leaves that test's template default untouched rather than baking an empty URL.
-my @set_args = map { ( '--set', "$_->{name}=$settings{ $_->{name} }" ) }
-    grep { length $settings{ $_->{name} } } @CONFIG_VARS;
-system( $^X, $sync, '--project', $pid, @set_args ) == 0
+# Populate the platform's tests, baking in this project's settings. PATRON_MODE
+# is baked from the platform. Only vars the user gave a value for are baked; a
+# blank leaves that test's template default untouched.
+say "\nPopulating the $platform_label tests into project $pid ...";
+my $sync     = "$FindBin::Bin/sync-cloud-tests.pl";
+my @set_args = ( '--set', "PATRON_MODE=$platform" );
+push @set_args, map { ( '--set', "$_->{name}=$settings{ $_->{name} }" ) }
+    grep { length $settings{ $_->{name} } } _vars_for($platform);
+system( $^X, $sync, '--project', $pid, @set_args, @{ $TEST_SETS{$platform} } ) == 0
     or die "Populating templates failed.\n";
 
 say "";
@@ -129,6 +173,12 @@ say "may need them raised in the UI ( project settings / Grafana support ).";
 say "=" x 42;
 
 # ------------------------------------------------------------
+
+# The config vars that apply to a platform ( its own + the shared ones ).
+sub _vars_for {
+    my ($platform) = @_;
+    return grep { $_->{mode} eq 'both' || $_->{mode} eq $platform } @CONFIG_VARS;
+}
 
 sub _api {
     my ( $method, $url, $body ) = @_;
@@ -205,14 +255,15 @@ sub _read_line {
     return length $val ? $val : $default;
 }
 
-# Ask for each config var ( explanation + default ). Returns name => value.
-# Non-interactive ( --defaults, dry-run, or no TTY ) just takes the defaults,
-# with any --set VAR=VALUE seeds applied.
+# Ask for each config var that applies to the platform ( explanation + default ).
+# Returns name => value. Non-interactive ( --defaults, dry-run, or no TTY ) just
+# takes the defaults, with any --set VAR=VALUE seeds applied.
 sub _prompt_settings {
+    my ($platform) = @_;
     my %s;
     my $interactive = ( -t STDIN ) && !$opt_defaults && !$dry_run;
     say "\nConfigure this project's tests ( press Enter to accept the default ):" if $interactive;
-    for my $v (@CONFIG_VARS) {
+    for my $v ( _vars_for($platform) ) {
         my $name    = $v->{name};
         my $default = defined $seed{$name} ? $seed{$name} : $v->{default};
         my $val     = $default;

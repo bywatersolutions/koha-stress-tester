@@ -7,8 +7,9 @@ project**, created and pre-configured in one command with
 
 ## The tests
 
-Every project is populated with the same set of tests, each pre-baked for that
-server:
+A project gets the patron-facing tests for the partner's platform (Aspen **or**
+OPAC) plus the shared Daily Operations and training tests, each pre-baked for
+that server:
 
 | Test | What it does | Login needed |
 | ---- | ------------ | ------------ |
@@ -20,32 +21,45 @@ server:
 | **Aspen Stress Test - HTTP Only** | High-volume Aspen Discovery search stress test — finds Aspen's ceiling | No |
 | **Aspen Stress Test - Browser** | Real Chromium doing a patron search + record view against Aspen | No |
 
+An **Aspen + Koha** partner gets the two Aspen tests; a **Koha-only** partner
+gets the two OPAC tests. Daily Operations and both Training tests are created
+either way.
+
 ## Standing up a project
 
-To give a server or engagement its own project, pre-filled with every test:
+To give a server or engagement its own project, pre-filled with the right tests:
 
 ```bash
-./bin/new-cloud-project.pl "Partner X"
+./bin/new-cloud-project.pl "Partner X"              # asks: Aspen + Koha, or Koha-only?
+./bin/new-cloud-project.pl "Partner X" --koha-only  # Koha-only, no prompt
 ```
 
-It discovers your org, creates **"Stress Testing - Partner X"**, and populates
-all the tests baked for that server. It prompts (with an explanation and a
-default) for each setting — press Enter to accept a default:
+First it asks the partner's **platform**, which decides the patron-facing tests:
 
-| Setting | Feeds |
-| ------- | ----- |
-| `OPAC_URL` | the Koha OPAC tests |
-| `STAFF_URL` | the staff / training tests |
-| `STAFF_USER` | superlibrarian username for the login tests (default `bwssupport`) |
-| `ASPEN_BASE_URL` | the Aspen tests — the library's Aspen Discovery URL (leave blank if none) |
-| `OPAC_SEARCHES_PER_HOUR` | the OPAC HTTP load rate |
-| `STAFF_TRANSACTIONS_PER_HOUR` | the Daily Operations load rate |
-| `PATRON_MODE` | `aspen` or `opac` — how Daily Operations simulates patron load |
-| `TRAINING_ATTENDEES` | training class size |
-| `CATALOG_SEARCH_TERM` | a term with hits in the catalog (browser tests) |
+- **Aspen + Koha** (default) — patrons search Aspen; the Koha OPAC is hit only by
+  the Aspen API. Creates the **Aspen** tests + Daily Operations (`PATRON_MODE=aspen`)
+  + training.
+- **Koha-only** (`--koha-only`) — patrons search the Koha OPAC directly. Creates
+  the **OPAC** tests + Daily Operations (`PATRON_MODE=opac`) + training.
 
-Credentials are **not** prompted — they stay on the org-wide secrets (below).
-Add `--defaults` to skip the prompts, or `--set VAR=VALUE` to pre-seed one.
+Then it prompts (with an explanation and a default) for the settings that apply
+to that platform — press Enter to accept a default:
+
+| Setting | Platform | Feeds |
+| ------- | -------- | ----- |
+| `STAFF_URL` | both | staff + training tests, and the Koha API |
+| `STAFF_USER` | both | superlibrarian username for the login tests (default `bwssupport`) |
+| `STAFF_TRANSACTIONS_PER_HOUR` | both | Daily Operations staff load |
+| `TRAINING_ATTENDEES` | both | training class size |
+| `CATALOG_SEARCH_TERM` | both | a term with hits in the catalog (browser tests) |
+| `ASPEN_BASE_URL` | Aspen + Koha | the Aspen tests — the patron catalog URL |
+| `PATRON_SESSIONS_PER_HOUR` | Aspen + Koha | Daily Operations patron load (Aspen→Koha API) |
+| `OPAC_URL` | Koha-only | the Koha OPAC tests + patron catalog |
+| `OPAC_SEARCHES_PER_HOUR` | Koha-only | the OPAC HTTP load rate |
+
+`PATRON_MODE` is set from the platform, not prompted. Credentials are **not**
+prompted — they stay on the org-wide secrets (below). Add `--defaults` to skip
+the prompts, or `--set VAR=VALUE` to pre-seed one.
 
 Share the project link; people just open a test and click **Run**. Each test is
 already pointed at the right server. If someone wants to keep a tweaked variant
