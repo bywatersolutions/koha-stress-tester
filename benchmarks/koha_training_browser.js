@@ -72,9 +72,15 @@ const STAFF_PASS_SECRET = __ENV.STAFF_PASS_SECRET || "staff-pass";
 // BROWSER_RATIO of the class as an experience sample. BROWSER_VUS forces an
 // exact count ( wins over the ratio ). Always <= 100.
 const BROWSER_VU_HARD_CAP = 100;
+// Keep the experience sample a handful: past this, extra real Chromiums just
+// starve the cloud generator's CPU - the cold-start login step blows its
+// latency budget ( ~17 browsers pushed login p95 to 50s+ ) while telling you
+// nothing new, since the HTTP training test already carries the full class
+// load. An explicit BROWSER_VUS override still wins ( up to the k6 cap ).
+const BROWSER_SAMPLE_CAP = parseInt(__ENV.BROWSER_SAMPLE_CAP) || 8;
 const BROWSER_VUS = Math.min(
   BROWSER_VU_HARD_CAP,
-  Math.max(1, parseInt(__ENV.BROWSER_VUS) || Math.ceil(TRAINING_ATTENDEES * BROWSER_RATIO)),
+  parseInt(__ENV.BROWSER_VUS) || Math.min(BROWSER_SAMPLE_CAP, Math.max(1, Math.ceil(TRAINING_ATTENDEES * BROWSER_RATIO))),
 );
 
 // Trainer pacing. Scan-and-click steps use STEP_JITTER_S; typing steps spread
@@ -113,6 +119,10 @@ const HOLD_BIBLIO_ID = __ENV.HOLD_BIBLIO_ID || "";
 // a class tolerates one trainee retrying, so demanding a perfect 1.0 makes
 // a single hiccup in 600 steps fail the whole certification
 const STEP_P95_MS = parseInt(__ENV.STEP_P95_MS) || 15000;
+// Login gets its own, wider budget: it's a cold browser launch + full staff
+// page + SSO reveal, dominated by browser startup rather than the server, so
+// holding it to the interactive-step ceiling flags a harness artifact as a fail.
+const LOGIN_P95_MS = parseInt(__ENV.LOGIN_P95_MS) || 30000;
 const CHECKS_RATE = parseFloat(__ENV.CHECKS_RATE) || 0.98;
 
 // Extra header sent on every request (browser and API), e.g. to let cloud
@@ -171,7 +181,8 @@ const thresholds = {
 };
 for (const s of STEPS) {
   if (s !== "wrap_up") {
-    thresholds[`training_step_duration{step:${s}}`] = [`p(95)<${STEP_P95_MS}`];
+    const ceiling = s === "login" ? LOGIN_P95_MS : STEP_P95_MS;
+    thresholds[`training_step_duration{step:${s}}`] = [`p(95)<${ceiling}`];
   }
 }
 
