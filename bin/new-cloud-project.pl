@@ -1,9 +1,9 @@
 #!/usr/bin/perl
 
 # new-cloud-project.pl - Create a new Grafana Cloud k6 project and fill it with
-# the four Koha stress-test templates - one command, no web-UI clicking, no
+# the Koha and Aspen stress-test templates - one command, no web-UI clicking, no
 # manual paste. Anyone with 'k6 cloud login' done can stand up a whole project
-# of clone-and-run tests for a partner or engagement.
+# of pre-configured tests for a partner or engagement.
 #
 # Usage:
 #   ./bin/new-cloud-project.pl "Partner X"   ( creates "Stress Testing - Partner X" )
@@ -36,6 +36,7 @@ my @CONFIG_VARS = (
     { name => 'OPAC_URL',                    desc => 'Public catalog (OPAC) base URL to test',                              default => 'https://catalog.example.org' },
     { name => 'STAFF_URL',                   desc => 'Staff interface base URL (login-based tests)',                        default => 'https://staff.example.org' },
     { name => 'STAFF_USER',                  desc => 'Superlibrarian username for the login-based tests',                   default => 'bwssupport' },
+    { name => 'BASE_URL',                    desc => 'Aspen Discovery base URL for the Aspen tests (leave blank if the library has no Aspen)', default => '' },
     { name => 'OPAC_SEARCHES_PER_HOUR',      desc => 'Peak OPAC catalog searches per hour to sustain',                      default => '5000', num => 1 },
     { name => 'STAFF_TRANSACTIONS_PER_HOUR', desc => 'Staff transactions per hour (Daily Operations test)',                 default => '1000', num => 1 },
     { name => 'PATRON_MODE',                 desc => "Patron catalog shape: 'opac' (direct Koha OPAC) or 'aspen' (Aspen REST API load)", default => 'aspen' },
@@ -87,7 +88,7 @@ unless ( defined $org && length $org ) {
 my %settings = _prompt_settings();
 
 if ($dry_run) {
-    say "\nDRY: would create project '$name' in org $org, then populate 4 templates with:";
+    say "\nDRY: would create project '$name' in org $org, then populate the templates with:";
     say "  $_->{name}=$settings{ $_->{name} }" for @CONFIG_VARS;
     exit 0;
 }
@@ -101,10 +102,13 @@ my $pid = decode_json( $res->{content} )->{project}{id}
     or die "Error: project created but no id returned.\n";
 say "Created project '$name' (id $pid) in org $org";
 
-# Populate the four templates, baking in this project's settings
-say "\nPopulating the four templates into project $pid ...";
+# Populate the templates, baking in this project's settings
+say "\nPopulating the templates into project $pid ...";
 my $sync = "$FindBin::Bin/sync-cloud-tests.pl";
-my @set_args = map { ( '--set', "$_->{name}=$settings{ $_->{name} }" ) } @CONFIG_VARS;
+# Only bake vars the user actually gave a value for; a blank ( e.g. no Aspen )
+# leaves that test's template default untouched rather than baking an empty URL.
+my @set_args = map { ( '--set', "$_->{name}=$settings{ $_->{name} }" ) }
+    grep { length $settings{ $_->{name} } } @CONFIG_VARS;
 system( $^X, $sync, '--project', $pid, @set_args ) == 0
     or die "Populating templates failed.\n";
 
@@ -113,8 +117,8 @@ say "=" x 42;
 say "Project ready:";
 say "  https://bws.grafana.net/a/k6-app/projects/$pid";
 say "";
-say "The tests are pre-configured for this server. Runners can clone one";
-say "( Save as... ) and Run as-is, or tweak the <<< SET values first.";
+say "The tests are pre-configured for this server. Run each as-is, or";
+say "tweak the <<< SET values first.";
 say "See docs/GRAFANA_CLOUD.md.";
 say "";
 say "Secrets ( staff-pass, the ingress token ) are org-wide, so they apply";

@@ -1,15 +1,14 @@
 #!/usr/bin/perl
 
-# sync-cloud-tests.pl - Push the benchmark scripts up to Grafana Cloud as
-# SCRIPT-EDITOR tests, so people can run them from the web UI against any
-# server: they open a test, clone it ( Save as... ), edit the values marked
-# "<<< SET" at the top of the script, and click Run.
+# sync-cloud-tests.pl - Push the benchmark scripts up to a Grafana Cloud project
+# as SCRIPT-EDITOR tests, so people can run them from the web UI - no local k6.
+# new-cloud-project.pl calls this to populate a new project; run it directly to
+# update the tests in an existing project after the .js files change.
 #
 # These are script-editor tests ( the script text lives in the test and is
-# editable/clonable in the browser ), NOT CLI archive tests - so this uses the
-# k6 Cloud REST API to create/update each test's script, keyed by
-# ( project, name ). Re-running updates the script in place; it never touches a
-# clone someone made.
+# editable in the browser ), NOT CLI archive tests - so this uses the k6 Cloud
+# REST API to create/update each test's script, keyed by ( project, name ).
+# Re-running updates the script in place.
 #
 # Usage:
 #   ./bin/sync-cloud-tests.pl                 # create/update all templates

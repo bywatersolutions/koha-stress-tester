@@ -35,23 +35,30 @@ This tool simulates many users hitting your catalog simultaneously to measure pe
 | `aspen_browser.js` | Browser | k6 only      | Aspen Discovery with real browser       |
 | `koha.js`          | Browser | k6 only      | Koha ILS staff interface (template)     |
 | `koha_training_browser.js` | Browser | k6 or Grafana Cloud | N librarians in lockstep - training-session certification |
+| `koha_training_protocol.js` | HTTP | k6 or Grafana Cloud | N librarians in lockstep - training ( HTTP, cheap ) |
 | `koha_steady_state.js` | HTTP | k6 or Grafana Cloud | Daily-ops: staff + patron ( Aspen or OPAC ) sharing the pool |
+| `koha_opac_http.js` | HTTP | k6 or Grafana Cloud | Anonymous OPAC catalog searches at a target rate |
+| `koha_opac_browser.js` | Browser | k6 or Grafana Cloud | Real browser patron OPAC search + record view |
 
 **HTTP tests** are the primary focus - they can simulate hundreds of concurrent users and run in Docker.  
 **Browser tests** require the k6 binary installed locally (not Docker).
 
 ## Running from Grafana Cloud (no local setup)
 
-The Koha tests are also published to Grafana Cloud as clone-and-run templates,
-so anyone can point them at any server from the browser - no local k6 needed.
-Open the [Koha Stress Tests project](https://bws.grafana.net/a/k6-app/projects/8020159),
-clone a test, edit the values marked `<<< SET` at the top of its script, and Run.
-See [docs/GRAFANA_CLOUD.md](docs/GRAFANA_CLOUD.md).
+The tests also run in Grafana Cloud, so anyone can run them from the browser -
+no local k6 needed. Each server or engagement gets its own project, created and
+pre-configured in one command:
 
-Stand up a fresh project of all four tests with one command:
-`./bin/new-cloud-project.pl "Partner X - Stress Tests"`. Push later script
-changes with `./bin/sync-cloud-tests.pl`. Both use the k6 Cloud REST API and
-just need `k6 cloud login` done once.
+```
+./bin/new-cloud-project.pl "Partner X"
+```
+
+That creates "Stress Testing - Partner X", populates every test ( Koha OPAC,
+staff, training, and Aspen ), and bakes in that server's URLs and load rates.
+Open the project, pick a test, and Run. Push later script changes to an existing
+project with `./bin/sync-cloud-tests.pl --project <ID>`. Both use the k6 Cloud
+REST API and just need `k6 cloud login` done once. See
+[docs/GRAFANA_CLOUD.md](docs/GRAFANA_CLOUD.md).
 
 > **WARNING:** Do not run these tests blindly. Always review and configure the `.env` file before running. These scripts can generate significant load on target systems - ensure you have permission to test the target and understand the configured VU counts and durations.
 
