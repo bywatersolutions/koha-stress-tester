@@ -21,6 +21,36 @@ import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 function randomElement(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
+// When ratePerHour is set, run an open model ( ramping-arrival-rate ): searches
+// arrive at the target rate whether or not the server keeps up - the honest
+// model for "can it sustain N searches/hour?". Otherwise the legacy staged ramp.
+function buildLoadOptions(opts) {
+  const { ratePerHour, duration, rampTime, preAllocatedVUs, maxVUs, gracefulStop, generateStages } = opts;
+  if (!ratePerHour) {
+    return { gracefulStop, stages: generateStages() };
+  }
+  const rate = Math.max(1, Math.round(ratePerHour));
+  // Little's law estimate: concurrent sessions = rate x mean session length
+  // (~90s), padded 1.5x. Tune via PRE_ALLOCATED_VUS if dropped_iterations > 0.
+  const pool = preAllocatedVUs || Math.ceil((rate / 3600) * 90 * 1.5);
+  return {
+    scenarios: {
+      open_model: {
+        executor: "ramping-arrival-rate",
+        startRate: 0,
+        timeUnit: "1h",
+        stages: [
+          { duration: rampTime, target: rate },
+          { duration: duration, target: rate },
+          { duration: rampTime, target: 0 },
+        ],
+        preAllocatedVUs: pool,
+        maxVUs: Math.max(pool, maxVUs || pool),
+        gracefulStop,
+      },
+    },
+  };
+}
 
 // ══════════════════════════════════════════════════════════════════════
 //  ▶ HOW TO RUN: clone this test ( Save as… ), set the values in the
@@ -29,7 +59,8 @@ function randomElement(arr) {
 // ─── RUN CONFIG ( edit these ) ────────────────────────────────────────
 const ASPEN_BASE_URL = __ENV.ASPEN_BASE_URL || "https://aspen.localhost"; // <<< SET: Aspen Discovery URL to test
 const ASPEN_HOST_HEADER = __ENV.ASPEN_HOST_HEADER || ""; // <<< SET: Host header if Aspen is behind a proxy ( blank if not )
-const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300; // <<< SET: peak concurrent virtual users to ramp up to
+const ASPEN_SEARCHES_PER_HOUR = parseFloat(__ENV.ASPEN_SEARCHES_PER_HOUR) || 0; // <<< SET: sustain this many searches/hour ( e.g. 5000 ) - the sizing cert; 0 = VU-ramp breakpoint mode instead
+const MAX_VUS = parseInt(__ENV.MAX_VUS) || 300; // <<< SET: peak VUs for the breakpoint ramp ( used only when ASPEN_SEARCHES_PER_HOUR is 0 )
 // ──────────────────────────────────────────────────────────────────────
 
 // Extra header sent on every request, e.g. to skip a restricted ingress
@@ -62,6 +93,10 @@ const SLOW_LOG_MS = parseInt(__ENV.ASPEN_SLOW_LOG_MS) || 6000;
 const NO_CONNECTION_REUSE = ["1", "on", "true", "enabled"].includes((__ENV.NO_CONNECTION_REUSE || "").toLowerCase());
 const OUTPUT_FILE = __ENV.OUTPUT_FILE || "";
 const TEST_NUMBER = __ENV.TEST_NUMBER || "001";
+
+// Open-model ( arrival-rate ) parameters, used when ASPEN_SEARCHES_PER_HOUR is set.
+const DURATION = __ENV.DURATION || "15m"; // steady-state duration at the target rate
+const PRE_ALLOCATED_VUS = parseInt(__ENV.PRE_ALLOCATED_VUS) || 0; // 0 = estimate from the rate
 
 // Grafana Cloud test metadata. Without CLOUD_PROJECT_ID a cloud run lands in
 // the org's default project ( and its VU limit ), not the project whose limit
@@ -149,14 +184,27 @@ function generateStages() {
   return stages;
 }
 
+// Each iteration issues one /Union/Search, so the search rate = the iteration
+// arrival rate. With ASPEN_SEARCHES_PER_HOUR set, run the open model at that
+// rate; otherwise the legacy staged VU ramp ( breakpoint mode ).
+const RATE_PER_HOUR = ASPEN_SEARCHES_PER_HOUR || 0;
+const LOAD_MODEL = RATE_PER_HOUR ? "open" : "staged";
+
 const cloudConfig = { name: CLOUD_TEST_NAME };
 if (CLOUD_PROJECT_ID) cloudConfig.projectID = parseInt(CLOUD_PROJECT_ID);
 
 export const options = {
   cloud: cloudConfig,
   insecureSkipTLSVerify: true,
-  gracefulStop: "10s", // Allow iterations to complete cleanly
-  stages: generateStages(),
+  ...buildLoadOptions({
+    ratePerHour: RATE_PER_HOUR,
+    duration: DURATION,
+    rampTime: RAMP_TIME,
+    preAllocatedVUs: PRE_ALLOCATED_VUS,
+    maxVUs: MAX_VUS,
+    gracefulStop: "10s",
+    generateStages,
+  }),
   summaryTrendStats: ["avg", "min", "med", "max", "p(90)", "p(95)", `p(${THRESHOLD_PERCENTILE})`],
   thresholds: {
     http_req_duration: [
@@ -177,6 +225,7 @@ export async function setup() {
   console.log(`ASPEN_BASE_URL: ${ASPEN_BASE_URL}`);
   if (ASPEN_HOST_HEADER) console.log(`ASPEN_HOST_HEADER: ${ASPEN_HOST_HEADER}`);
   console.log(`${EXTERNAL_SERVICE_HEADER}: ${RESOLVED_TOKEN ? `set (${EXTERNAL_SERVICE_TOKEN ? "from env" : "from Grafana Cloud secret"})` : "not sent"}`);
+  console.log(`LOAD_MODEL: ${LOAD_MODEL}${RATE_PER_HOUR ? ` (${ASPEN_SEARCHES_PER_HOUR} searches/hour, ${DURATION} steady state)` : ` (VU ramp to ${MAX_VUS})`}`);
   console.log(`MAX_VUS: ${MAX_VUS}, VU_STEP: ${VU_STEP}`);
   console.log(`RAMP_TIME: ${RAMP_TIME}, HOLD_TIME: ${HOLD_TIME}`);
   console.log(`ABORT_MS: ${ABORT_MS} (abort test when p(${THRESHOLD_PERCENTILE}) exceeds this)`);
@@ -298,6 +347,9 @@ export function handleSummary(data) {
     config: {
       baseUrl: ASPEN_BASE_URL,
       hostHeader: ASPEN_HOST_HEADER || "(not set)",
+      loadModel: LOAD_MODEL,
+      aspenSearchesPerHour: ASPEN_SEARCHES_PER_HOUR || null,
+      duration: RATE_PER_HOUR ? DURATION : null,
       maxVUs: MAX_VUS,
       vuStep: VU_STEP,
       rampTime: RAMP_TIME,

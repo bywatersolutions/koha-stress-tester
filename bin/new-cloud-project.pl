@@ -49,6 +49,7 @@ my @CONFIG_VARS = (
     { name => 'OPAC_URL',                    mode => 'opac',  desc => 'Public catalog (OPAC) base URL - patrons search it directly',         default => 'https://catalog.example.org' },
     { name => 'ASPEN_BASE_URL',              mode => 'aspen', desc => 'Aspen Discovery base URL - the patron catalog',                       default => 'https://discovery.example.org' },
     { name => 'OPAC_SEARCHES_PER_HOUR',      mode => 'opac',  desc => 'Peak OPAC catalog searches per hour to sustain',                      default => '5000', num => 1 },
+    { name => 'ASPEN_SEARCHES_PER_HOUR',     mode => 'aspen', desc => 'Peak Aspen catalog searches per hour to sustain (certify at this rate)', default => '5000', num => 1 },
     { name => 'PATRON_SESSIONS_PER_HOUR',    mode => 'aspen', desc => 'Patron sessions/hour (Aspen->Koha API load, Daily Operations)',       default => '2000', num => 1 },
     { name => 'STAFF_TRANSACTIONS_PER_HOUR', mode => 'both',  desc => 'Staff transactions per hour (Daily Operations test)',                 default => '1000', num => 1 },
     { name => 'TRAINING_ATTENDEES',          mode => 'both',  desc => 'Training class size (number of attendees)',                           default => '50', num => 1 },

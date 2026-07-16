@@ -53,6 +53,7 @@ to that platform — press Enter to accept a default:
 | `TRAINING_ATTENDEES` | both | training class size |
 | `CATALOG_SEARCH_TERM` | both | a term with hits in the catalog (browser tests) |
 | `ASPEN_BASE_URL` | Aspen + Koha | the Aspen tests — the patron catalog URL |
+| `ASPEN_SEARCHES_PER_HOUR` | Aspen + Koha | Aspen search rate to certify (e.g. 5000) — sustained arrival-rate run |
 | `PATRON_SESSIONS_PER_HOUR` | Aspen + Koha | Daily Operations patron load (Aspen→Koha API) |
 | `OPAC_URL` | Koha-only | the Koha OPAC tests + patron catalog |
 | `OPAC_SEARCHES_PER_HOUR` | Koha-only | the OPAC HTTP load rate |
