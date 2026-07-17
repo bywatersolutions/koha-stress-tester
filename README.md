@@ -45,6 +45,9 @@ This tool simulates many users hitting your catalog simultaneously to measure pe
 
 ## Running from Grafana Cloud (no local setup)
 
+> **Testing a new partner?** Follow [docs/RUNBOOK.md](docs/RUNBOOK.md): set your
+> API token once, run `./bin/run-cloud.pl`, answer the prompts. One page.
+
 The tests also run in Grafana Cloud, so anyone can run them from the browser -
 no local k6 needed. Each server or engagement gets its own project, created and
 pre-configured in one command:

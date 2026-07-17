@@ -287,14 +287,18 @@ sub _prompt_settings {
 }
 
 sub _k6_token {
+    # The token: GRAFANA_CLOUD_K6_PERSONAL_API_TOKEN env var wins; otherwise fall
+    # back to a prior 'k6 cloud login'.
+    return $ENV{GRAFANA_CLOUD_K6_PERSONAL_API_TOKEN}
+        if length( $ENV{GRAFANA_CLOUD_K6_PERSONAL_API_TOKEN} // '' );
     my $cfg = "$ENV{HOME}/Library/Application Support/k6/config.json";
-    die "Error: k6 config not found at $cfg - run 'k6 cloud login --token <token>' first.\n"
+    die "Set GRAFANA_CLOUD_K6_PERSONAL_API_TOKEN, or run 'k6 cloud login --token <token>' first.\n"
         unless -f $cfg;
     open my $fh, '<', $cfg or die "Cannot read $cfg: $!\n";
     local $/;
     my $data = decode_json(<$fh>);
     my $tok = $data->{collectors}{cloud}{token}
-        or die "Error: no cloud token in $cfg - run 'k6 cloud login' first.\n";
+        or die "Set GRAFANA_CLOUD_K6_PERSONAL_API_TOKEN, or run 'k6 cloud login' first.\n";
     return $tok;
 }
 
