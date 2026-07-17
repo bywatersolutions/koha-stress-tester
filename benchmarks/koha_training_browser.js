@@ -125,6 +125,10 @@ const STEP_P95_MS = parseInt(__ENV.STEP_P95_MS) || 15000;
 // ( did the VU log in ), not latency - the HTTP training test certifies the
 // server's login time; the browser's login time here is startup + retry noise.
 const LOGIN_ATTEMPTS = parseInt(__ENV.LOGIN_ATTEMPTS) || 4;
+// The place-hold submit can flake on a contended cloud browser too ( click or
+// navigation dropped ), leaving no hold - so retry the whole action, not just
+// the verify, up to HOLD_ATTEMPTS times.
+const HOLD_ATTEMPTS = parseInt(__ENV.HOLD_ATTEMPTS) || 3;
 const CHECKS_RATE = parseFloat(__ENV.CHECKS_RATE) || 0.98;
 
 // Extra header sent on every request (browser and API), e.g. to let cloud
@@ -729,39 +733,53 @@ export default async function (data) {
     });
 
     await runStep("place_hold", page, async () => {
-      // Deliberate collision: every attendee holds the same bib for their own patron
-      await page.goto(
-        `${STAFF_BASE_URL}/cgi-bin/koha/reserve/request.pl?biblionumber=${data.holdBiblioId}&findborrower=${encodeURIComponent(patron.cardnumber)}`,
-        { waitUntil: "domcontentloaded" },
-      );
-      // Koha renders the submit as either an input or a button depending on
-      // the form variant, so accept both
-      let placeHoldBtn = page.locator('#hold-request-form input[type="submit"][value="Place hold"]');
-      if ((await placeHoldBtn.count()) === 0) {
-        placeHoldBtn = page.locator('#hold-request-form button[type="submit"]');
-      }
-      if ((await placeHoldBtn.count()) === 0) {
-        throw new Error("Place hold button not found (hold may be blocked by policy)");
-      }
-      await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), placeHoldBtn.first().click()]);
-      // The existing-holds list is an AJAX DataTable that fills on its own
-      // schedule, so verify against the API. The hold may not be queryable the
-      // instant the submit navigates ( DB commit / read-replica lag under a
-      // class-sized burst ), so poll a few times before giving up.
-      let mine = false;
-      for (let i = 0; i < 3 && !mine; i++) {
-        if (i > 0) sleep(0.5);
+      // Has our hold landed? A NEW hold ( one not in the preexisting set ),
+      // verified against the API rather than the AJAX-filled existing-holds
+      // DataTable. This also covers DB commit / replica lag after the submit.
+      const holdPlaced = async () => {
         const holdsRes = http.get(
           `${API}/holds?q=${jsonQ({ patron_id: patron.patron_id, biblio_id: data.holdBiblioId })}&_per_page=100`,
           await apiParams(),
         );
-        mine = holdsRes.status === 200 && holdsRes.json().some(
+        return holdsRes.status === 200 && holdsRes.json().some(
           (h) => !data.preexistingHoldIds.includes(h.hold_id),
         );
+      };
+
+      // Retry the whole action: on a contended cloud browser the submit click or
+      // its navigation can drop, leaving no hold - re-goto + re-submit recovers
+      // it. A prior attempt's success ( or a lagged commit ) is detected up top,
+      // so we never place a duplicate.
+      let lastErr;
+      for (let attempt = 1; attempt <= HOLD_ATTEMPTS; attempt++) {
+        if (attempt > 1) sleep(0.5);
+        try {
+          if (await holdPlaced()) return;
+
+          // Deliberate collision: every attendee holds the same bib for their patron.
+          await page.goto(
+            `${STAFF_BASE_URL}/cgi-bin/koha/reserve/request.pl?biblionumber=${data.holdBiblioId}&findborrower=${encodeURIComponent(patron.cardnumber)}`,
+            { waitUntil: "domcontentloaded" },
+          );
+          // Koha renders the submit as either an input or a button depending on
+          // the form variant, so accept both.
+          let placeHoldBtn = page.locator('#hold-request-form input[type="submit"][value="Place hold"]');
+          if ((await placeHoldBtn.count()) === 0) {
+            placeHoldBtn = page.locator('#hold-request-form button[type="submit"]');
+          }
+          if ((await placeHoldBtn.count()) === 0) {
+            throw new Error("Place hold button not found (hold may be blocked by policy)");
+          }
+          await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded" }), placeHoldBtn.first().click()]);
+          if (await holdPlaced()) return; // placed
+
+          lastErr = new Error("Hold not present on the bib after placing");
+        } catch (e) {
+          lastErr = e;
+          console.warn(`place_hold attempt ${attempt}/${HOLD_ATTEMPTS} for ${patron.cardnumber} failed: ${e && e.message ? e.message : e}`);
+        }
       }
-      if (!mine) {
-        throw new Error("Hold not present on the bib after placing");
-      }
+      throw lastErr || new Error("Hold not present on the bib after placing");
     });
 
     if (vuNumber === 1) {
